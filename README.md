@@ -17,6 +17,9 @@ open .build/ChimeBuddy.app
 
 ## 菜单栏功能
 
+- 气泡底部可选择已经收到事件的会话；显示短标题和会话 ID。固定选择后，后台会话不会切换上下文，切换前发起的点评不能覆盖新会话。选择在重启后保留。
+- 这是手动选择，不是 Codex 前台会话自动跟随。本机公开协议未找到界面选中会话通知；当前只接入此项目，不扫描其他项目的聊天历史。
+- 气泡内的“设置”按钮与菜单栏 🐥 提供相同菜单。
 - 导入 GIF：选择不超过 20 MB 的有效 GIF，复制到应用数据目录，重启后恢复；可恢复默认小鸡。
 - 暂停消息显示：暂停弹出，仍在本地接收事件；不是停用 Hooks。
 - 专家、吐槽、双开：双开并发两次独立请求。默认专家模式。
@@ -32,7 +35,7 @@ open .build/ChimeBuddy.app
 - 事件保存在 `~/Library/Application Support/ChimeBuddy/events/`，窗口处理回执在同目录的 `receipts.jsonl`；这是本地验证数据，不会自动清理。
 - `last-hook-invocation.json` 只记录最近入口调用的时间、输入字节数及模拟标记，用于区分未调用和被过滤；不保存被拒绝的正文。
 - 菜单栏 🐥 → 退出 ChimeBuddy。停止 Hook 接入时，在 Codex 禁用这两项或移除此项目的 `.codex/hooks.json`。
-- `--hook --simulate` 只能验证传输和渲染，气泡和回执明确标记模拟，不能作为真实 Codex 接入证据。
+- `--hook --simulate` 只测试接收入口，模拟事件不加入会话列表，也不发送给模型，不能作为真实 Codex 接入证据。
 
 ## 本机验证（2026-11-05）
 
@@ -42,7 +45,11 @@ open .build/ChimeBuddy.app
 - 模拟事件经同一原生 Hook 入口写入，文件监听收到并显示气泡；通过窗口可访问性树确认 `[模拟] 收到你的消息` 及模拟正文。
 - 全屏显示：用户确认 Codex 全屏后气泡仍可见。
 - 模型：ChatGPT 登录检查通过；独立 CLI 请求返回 `CHIMEBUDDY_OK`；生产 `CodexReviewer.review` 入口用虚构对话实际调用成功，返回专家建议。
-- 真实桌面 Hooks：用户确认信任并启用，但尚无真实入口调用/事件回执，端到端对话点评仍未通过。需重新加载会话配置后复测，不能以全屏显示或模拟测试代替。
-- GIF 导入、模式菜单和双开逻辑已编译；真实 GIF 文件的交互导入和双开实际输出尚未验收。
+- Hooks：用桌面内置引擎的公开 `hooks/list` 读到两项 `enabled: true`、`trustStatus: trusted`，无配置错误。两次独立 `codex exec` 探针均实际触发用户消息和回合结束事件，窗口回执和 UI 已验证。未绕过 Hooks 信任。
+- 当前桌面聊天：仍未收到该聊天事件，不能把 CLI 探针当作桌面聊天验收。请退出并重新打开 Codex，回到本项目聊天发一句消息，若提示 Review hooks，检查并信任。桌宠菜单里应出现该聊天的新条目。
+- GIF：通过原生文件选择器实际导入两帧 GIF，截图确认两帧播放，恢复默认形象已验证。
+- 双开：从桌宠菜单实际并发调用，窗口收到专家和吐槽两项输出。
+- 会话隔离：第二个实际 CLI 会话的两项事件记录为 `receivedInBackground`，未覆盖第一个会话的点评；在下拉框选择第二个会话后显示 `SECOND_SESSION_OK`。
+- `bash scripts/test.sh` 验证模拟隔离、后台隔离、选中会话历史、排序与去重。详情见 [验收记录](docs/verification/2026-11-05.md)。
 
 参考：[Codex Hooks](https://learn.chatgpt.com/docs/hooks)、[Apple 全屏空间行为](https://developer.apple.com/documentation/appkit/nswindow/collectionbehavior-swift.struct/canjoinallapplications)。

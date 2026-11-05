@@ -9,16 +9,6 @@ let inbox = storage.appendingPathComponent("events")
 try FileManager.default.createDirectory(at: inbox, withIntermediateDirectories: true,
                                       attributes: [.posixPermissions: 0o700])
 
-struct HookEvent: Codable {
-    let id: String
-    let receivedAt: Date
-    let kind: String
-    let session: String
-    let turn: String
-    let text: String
-    let simulated: Bool
-}
-
 // This executable also acts as the short-lived hook. It never calls a model or
 // writes instructions back into the Codex conversation.
 if CommandLine.arguments.contains("--hook") {
@@ -76,7 +66,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var connectionLabel: NSTextField!
     var pauseItem: NSMenuItem!
     var paused = UserDefaults.standard.bool(forKey: "displayPaused")
-    var lastEvent: HookEvent?
+    let sessions = SessionStore(selectedID: UserDefaults.standard.string(forKey: "selectedSession"))
+    var lastEvent: HookEvent? { sessions.latest }
+    var sessionPicker: NSPopUpButton!
     var mode = ReviewMode(rawValue: UserDefaults.standard.string(forKey: "reviewMode") ?? "expert") ?? .expert
     var modeItems: [NSMenuItem] = []
     var autoReview = UserDefaults.standard.bool(forKey: "autoReview")
@@ -86,9 +78,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        panel = BuddyPanel(contentRect: NSRect(x: 0, y: 0, width: 350, height: 190),
+        panel = BuddyPanel(contentRect: NSRect(x: 0, y: 0, width: 350, height: 220),
                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.title = "ChimeBuddy"
+        panel.appearance = NSAppearance(named: .aqua)
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .canJoinAllApplications]
         panel.isFloatingPanel = true
@@ -105,28 +98,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let face = NSTextField(labelWithString: "🐥")
         defaultFace = face
         face.font = .systemFont(ofSize: 42)
-        face.frame = NSRect(x: 20, y: 120, width: 60, height: 55)
-        avatar = NSImageView(frame: NSRect(x: 16, y: 116, width: 66, height: 66))
+        face.frame = NSRect(x: 20, y: 150, width: 60, height: 55)
+        avatar = NSImageView(frame: NSRect(x: 16, y: 146, width: 66, height: 66))
         avatar.imageScaling = .scaleProportionallyUpOrDown
         avatar.animates = true
         avatar.isHidden = true
         titleLabel = NSTextField(labelWithString: "等待 Codex 消息")
         titleLabel.font = .boldSystemFont(ofSize: 15)
         titleLabel.textColor = .black
-        titleLabel.frame = NSRect(x: 87, y: 141, width: 245, height: 25)
+        titleLabel.frame = NSRect(x: 87, y: 171, width: 245, height: 25)
         connectionLabel = NSTextField(labelWithString: "尚未收到真实事件")
         connectionLabel.font = .systemFont(ofSize: 11)
         connectionLabel.textColor = .darkGray
-        connectionLabel.frame = NSRect(x: 87, y: 120, width: 245, height: 20)
+        connectionLabel.frame = NSRect(x: 87, y: 150, width: 245, height: 20)
         messageLabel = NSTextField(wrappingLabelWithString: "等待本项目的真实对话事件。\n菜单栏 🐥 可导入 GIF、切换模式和点评。\n点评使用 Codex 用量，自动点评默认关闭。")
         messageLabel.font = .systemFont(ofSize: 13)
         messageLabel.textColor = .darkGray
-        messageLabel.frame = NSRect(x: 22, y: 22, width: 306, height: 95)
+        messageLabel.frame = NSRect(x: 22, y: 48, width: 306, height: 95)
         view.addSubview(face)
         view.addSubview(avatar)
         view.addSubview(connectionLabel)
         view.addSubview(titleLabel)
         view.addSubview(messageLabel)
+        sessionPicker = NSPopUpButton(frame: NSRect(x: 20, y: 10, width: 245, height: 27))
+        sessionPicker.target = self
+        sessionPicker.action = #selector(selectSession)
+        view.addSubview(sessionPicker)
+        let settings = NSButton(title: "设置", target: self, action: #selector(showSettings))
+        settings.frame = NSRect(x: 272, y: 10, width: 60, height: 27)
+        view.addSubview(settings)
         panel.contentView = view
         loadAvatar()
         if let screen = NSScreen.main {
@@ -162,12 +162,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // rather than repeatedly polling conversation files.
         for url in (try? FileManager.default.contentsOfDirectory(at: inbox, includingPropertiesForKeys: nil)) ?? [] {
             seen.insert(url.lastPathComponent)
-            if let data = try? Data(contentsOf: url), let event = try? JSONDecoder().decode(HookEvent.self, from: data),
-               !event.simulated, event.receivedAt > (lastEvent?.receivedAt ?? .distantPast) {
-                lastEvent = event
+            if let data = try? Data(contentsOf: url), let event = try? JSONDecoder().decode(HookEvent.self, from: data) {
+                sessions.receive(event)
             }
         }
+        refreshSessions()
+
         refreshStatus()
+        if let event = lastEvent {
+            titleLabel.stringValue = "已载入固定会话"
+            messageLabel.stringValue = String(event.text.prefix(130))
+        }
         fd = open(inbox.path, O_EVTONLY)
         guard fd >= 0 else { messageLabel.stringValue = "无法监听事件目录"; return }
         source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: .write, queue: .main)
@@ -185,8 +190,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return event
             }.sorted { $0.receivedAt < $1.receivedAt }
         for event in events {
+            let affectsSelection = sessions.receive(event)
+            refreshSessions()
+            guard affectsSelection else {
+                writeReceipt(["state": "receivedInBackground", "eventID": event.id, "simulated": event.simulated])
+                continue
+            }
             reviewGeneration = UUID()
-            if !event.simulated { lastEvent = event }
             refreshStatus()
             if paused {
                 writeReceipt(["state": "receivedWhilePaused", "eventID": event.id, "simulated": event.simulated])
@@ -200,6 +210,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                           "session": event.session, "turn": event.turn, "simulated": event.simulated])
             if !event.simulated && event.kind == "Stop" && autoReview { reviewLatest() }
         }
+    }
+
+    func refreshSessions() {
+        sessionPicker.removeAllItems()
+        if let id = sessions.selectedID, !sessions.sessions.contains(id) {
+            sessionPicker.addItem(withTitle: "所选会话暂不可用 · " + String(id.prefix(8)))
+        }
+        for id in sessions.sessions {
+            sessionPicker.addItem(withTitle: sessions.title(for: id))
+            sessionPicker.lastItem?.representedObject = id
+            if id == sessions.selectedID { sessionPicker.select(sessionPicker.lastItem) }
+        }
+        if sessions.sessions.isEmpty { sessionPicker.addItem(withTitle: "等待真实会话 · 手动选择") }
+        if let id = sessions.selectedID { UserDefaults.standard.set(id, forKey: "selectedSession") }
+    }
+
+    @objc func selectSession() {
+        guard let id = sessionPicker.selectedItem?.representedObject as? String else { return }
+        sessions.select(id)
+        reviewGeneration = UUID()
+        UserDefaults.standard.set(id, forKey: "selectedSession")
+        refreshStatus()
+        titleLabel.stringValue = "已切换观察会话"
+        messageLabel.stringValue = String((lastEvent?.text ?? "等待此会话的消息").prefix(130))
+    }
+
+    @objc func showSettings() {
+        statusItem.menu?.popUp(positioning: nil, at: NSPoint(x: 270, y: 38), in: panel.contentView)
     }
 
     @objc func selectMode(_ sender: NSMenuItem) {
@@ -217,19 +255,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func reviewLatest() {
-        guard !paused && !reviewing else { return }
-        guard let latest = lastEvent else {
+        guard !paused else { return }
+        guard !reviewing else {
+            titleLabel.stringValue = "上次点评尚未结束"
+            messageLabel.stringValue = "旧结果不会覆盖已切换的会话，请稍后再试。"
+            return
+        }
+        guard lastEvent != nil else {
             titleLabel.stringValue = "还没有可点评的真实消息"
             messageLabel.stringValue = "先确认 Codex Hooks 接通。模拟事件不会发送给模型。"
             panel.orderFrontRegardless()
             return
         }
-        let urls = (try? FileManager.default.contentsOfDirectory(at: inbox, includingPropertiesForKeys: nil)) ?? []
-        let history = urls.compactMap { url -> HookEvent? in
-            guard let data = try? Data(contentsOf: url) else { return nil }
-            return try? JSONDecoder().decode(HookEvent.self, from: data)
-        }.filter { !$0.simulated && $0.session == latest.session && $0.receivedAt <= latest.receivedAt }
-            .sorted { $0.receivedAt < $1.receivedAt }.suffix(6)
+        let history = sessions.history.suffix(6)
         let excerpts = history.map { ["role": $0.kind == "Stop" ? "assistant" : "user", "excerpt": $0.text] }
         guard let json = try? JSONSerialization.data(withJSONObject: excerpts), let context = String(data: json, encoding: .utf8) else { return }
         reviewing = true
@@ -268,7 +306,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             connectionLabel.stringValue = "已暂停显示 · 仍在本地接收事件"
         } else if let event = lastEvent {
             let time = DateFormatter.localizedString(from: event.receivedAt, dateStyle: .none, timeStyle: .short)
-            connectionLabel.stringValue = "最近真实事件 \(time) · \(event.session.prefix(8))"
+            connectionLabel.stringValue = "固定会话 · 最近事件 \(time)"
         } else {
             connectionLabel.stringValue = "尚未收到真实事件"
         }
