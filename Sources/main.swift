@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import UniformTypeIdentifiers
 
 let workspace = "/Users/USER/Documents/my-learn/ChimeBuddy"
 let storage = FileManager.default.homeDirectoryForCurrentUser
@@ -23,6 +24,14 @@ struct HookEvent: Codable {
 if CommandLine.arguments.contains("--hook") {
     do {
         let input = FileHandle.standardInput.readDataToEndOfFile()
+        let metadata: [String: Any] = ["at": ISO8601DateFormatter().string(from: Date()),
+                                      "inputBytes": input.count,
+                                      "simulated": CommandLine.arguments.contains("--simulate")]
+        // Metadata only: proves the hook command was invoked even if validation
+        // below rejects the payload. Never stores raw rejected conversation data.
+        if let data = try? JSONSerialization.data(withJSONObject: metadata) {
+            try? data.write(to: storage.appendingPathComponent("last-hook-invocation.json"), options: .atomic)
+        }
         guard input.count <= 4_000_000,
               let object = try JSONSerialization.jsonObject(with: input) as? [String: Any],
               object["cwd"] as? String == workspace,
@@ -62,12 +71,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var source: DispatchSourceFileSystemObject?
     var seen = Set<String>()
     var fd: Int32 = -1
+    var avatar: NSImageView!
+    var defaultFace: NSTextField!
+    var connectionLabel: NSTextField!
+    var pauseItem: NSMenuItem!
+    var paused = UserDefaults.standard.bool(forKey: "displayPaused")
+    var lastEvent: HookEvent?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         panel = BuddyPanel(contentRect: NSRect(x: 0, y: 0, width: 350, height: 190),
                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        panel.title = "ChimeBuddy — Hooks 验证"
+        panel.title = "ChimeBuddy"
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .canJoinAllApplications]
         panel.isFloatingPanel = true
@@ -82,20 +97,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         view.layer?.backgroundColor = NSColor(calibratedRed: 0.98, green: 0.96, blue: 0.91, alpha: 0.98).cgColor
         view.layer?.cornerRadius = 24
         let face = NSTextField(labelWithString: "🐥")
+        defaultFace = face
         face.font = .systemFont(ofSize: 42)
         face.frame = NSRect(x: 20, y: 120, width: 60, height: 55)
+        avatar = NSImageView(frame: NSRect(x: 16, y: 116, width: 66, height: 66))
+        avatar.imageScaling = .scaleProportionallyUpOrDown
+        avatar.animates = true
+        avatar.isHidden = true
         titleLabel = NSTextField(labelWithString: "等待 Codex 消息")
         titleLabel.font = .boldSystemFont(ofSize: 15)
         titleLabel.textColor = .black
         titleLabel.frame = NSRect(x: 87, y: 141, width: 245, height: 25)
-        messageLabel = NSTextField(wrappingLabelWithString: "本地验证，不调用 AI。\n收到真实 Hooks 后会显示消息摘要。\n可拖动此气泡；菜单栏 🐥 可退出。")
+        connectionLabel = NSTextField(labelWithString: "尚未收到真实事件")
+        connectionLabel.font = .systemFont(ofSize: 11)
+        connectionLabel.textColor = .darkGray
+        connectionLabel.frame = NSRect(x: 87, y: 120, width: 245, height: 20)
+        messageLabel = NSTextField(wrappingLabelWithString: "等待本项目的真实对话事件。\n菜单栏 🐥 可导入 GIF、暂停显示和退出。")
         messageLabel.font = .systemFont(ofSize: 13)
         messageLabel.textColor = .darkGray
         messageLabel.frame = NSRect(x: 22, y: 22, width: 306, height: 95)
         view.addSubview(face)
+        view.addSubview(avatar)
+        view.addSubview(connectionLabel)
         view.addSubview(titleLabel)
         view.addSubview(messageLabel)
         panel.contentView = view
+        loadAvatar()
         if let screen = NSScreen.main {
             panel.setFrameOrigin(NSPoint(x: screen.visibleFrame.maxX - 380, y: screen.visibleFrame.minY + 70))
         }
@@ -104,6 +131,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.title = "🐥"
         let menu = NSMenu()
         menu.addItem(withTitle: "显示气泡", action: #selector(showPanel), keyEquivalent: "")
+        menu.addItem(withTitle: "隐藏气泡", action: #selector(hidePanel), keyEquivalent: "")
+        pauseItem = menu.addItem(withTitle: "暂停消息显示", action: #selector(togglePause), keyEquivalent: "")
+        pauseItem.state = paused ? .on : .off
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(withTitle: "导入 GIF 形象…", action: #selector(importAvatar), keyEquivalent: "")
+        menu.addItem(withTitle: "恢复默认小鸡", action: #selector(resetAvatar), keyEquivalent: "")
+        menu.addItem(NSMenuItem.separator())
         menu.addItem(withTitle: "退出 ChimeBuddy", action: #selector(quit), keyEquivalent: "q")
         for item in menu.items { item.target = self }
         statusItem.menu = menu
@@ -112,7 +146,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // rather than repeatedly polling conversation files.
         for url in (try? FileManager.default.contentsOfDirectory(at: inbox, includingPropertiesForKeys: nil)) ?? [] {
             seen.insert(url.lastPathComponent)
+            if let data = try? Data(contentsOf: url), let event = try? JSONDecoder().decode(HookEvent.self, from: data),
+               !event.simulated, event.receivedAt > (lastEvent?.receivedAt ?? .distantPast) {
+                lastEvent = event
+            }
         }
+        refreshStatus()
         fd = open(inbox.path, O_EVTONLY)
         guard fd >= 0 else { messageLabel.stringValue = "无法监听事件目录"; return }
         source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: .write, queue: .main)
@@ -130,6 +169,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return event
             }.sorted { $0.receivedAt < $1.receivedAt }
         for event in events {
+            if !event.simulated { lastEvent = event }
+            refreshStatus()
+            if paused {
+                writeReceipt(["state": "receivedWhilePaused", "eventID": event.id, "simulated": event.simulated])
+                continue
+            }
             titleLabel.stringValue = (event.simulated ? "[模拟] " : "[Hooks] ") + (event.kind == "Stop" ? "Codex 回答结束" : "收到你的消息")
             messageLabel.stringValue = String(event.text.prefix(130))
             panel.orderFrontRegardless()
@@ -138,6 +183,75 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                           "session": event.session, "turn": event.turn, "simulated": event.simulated])
         }
     }
+
+    func refreshStatus() {
+        if paused {
+            connectionLabel.stringValue = "已暂停显示 · 仍在本地接收事件"
+        } else if let event = lastEvent {
+            let time = DateFormatter.localizedString(from: event.receivedAt, dateStyle: .none, timeStyle: .short)
+            connectionLabel.stringValue = "最近真实事件 \(time) · \(event.session.prefix(8))"
+        } else {
+            connectionLabel.stringValue = "尚未收到真实事件"
+        }
+    }
+
+    func loadAvatar() {
+        let url = storage.appendingPathComponent("avatar.gif")
+        guard let image = NSImage(contentsOf: url) else { return }
+        avatar.image = image
+        avatar.isHidden = false
+        defaultFace.isHidden = true
+    }
+
+    @objc func importAvatar() {
+        let picker = NSOpenPanel()
+        picker.title = "选择 GIF 形象"
+        picker.allowedContentTypes = [.gif]
+        picker.allowsMultipleSelection = false
+        picker.canChooseDirectories = false
+        NSApp.activate(ignoringOtherApps: true)
+        guard picker.runModal() == .OK, let url = picker.url else { return }
+        do {
+            let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+            guard let size = attributes[.size] as? NSNumber, size.intValue <= 20_000_000 else {
+                throw NSError(domain: "ChimeBuddy", code: 1, userInfo: [NSLocalizedDescriptionKey: "请选择不超过 20 MB 的 GIF。"])
+            }
+            let data = try Data(contentsOf: url)
+            guard data.starts(with: Data("GIF87a".utf8)) || data.starts(with: Data("GIF89a".utf8)),
+                  let image = NSImage(data: data), image.isValid else {
+                throw NSError(domain: "ChimeBuddy", code: 2, userInfo: [NSLocalizedDescriptionKey: "这个文件不是可读取的 GIF。"])
+            }
+            try data.write(to: storage.appendingPathComponent("avatar.gif"), options: .atomic)
+            loadAvatar()
+            panel.orderFrontRegardless()
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "无法导入形象"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
+    }
+
+    @objc func resetAvatar() {
+        let url = storage.appendingPathComponent("avatar.gif")
+        do {
+            if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+            avatar.image = nil
+            avatar.isHidden = true
+            defaultFace.isHidden = false
+        } catch {
+            let alert = NSAlert(error: error)
+            alert.runModal()
+        }
+    }
+
+    @objc func togglePause() {
+        paused.toggle()
+        UserDefaults.standard.set(paused, forKey: "displayPaused")
+        pauseItem.state = paused ? .on : .off
+        refreshStatus()
+    }
+    @objc func hidePanel() { panel.orderOut(nil) }
 
     func writeReceipt(_ values: [String: Any]) {
         var record = values
