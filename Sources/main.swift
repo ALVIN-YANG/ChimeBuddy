@@ -77,6 +77,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var pauseItem: NSMenuItem!
     var paused = UserDefaults.standard.bool(forKey: "displayPaused")
     var lastEvent: HookEvent?
+    var mode = ReviewMode(rawValue: UserDefaults.standard.string(forKey: "reviewMode") ?? "expert") ?? .expert
+    var modeItems: [NSMenuItem] = []
+    var autoReview = UserDefaults.standard.bool(forKey: "autoReview")
+    var autoItem: NSMenuItem!
+    var reviewing = false
+    var reviewGeneration = UUID()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -112,7 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         connectionLabel.font = .systemFont(ofSize: 11)
         connectionLabel.textColor = .darkGray
         connectionLabel.frame = NSRect(x: 87, y: 120, width: 245, height: 20)
-        messageLabel = NSTextField(wrappingLabelWithString: "等待本项目的真实对话事件。\n菜单栏 🐥 可导入 GIF、暂停显示和退出。")
+        messageLabel = NSTextField(wrappingLabelWithString: "等待本项目的真实对话事件。\n菜单栏 🐥 可导入 GIF、切换模式和点评。\n点评使用 Codex 用量，自动点评默认关闭。")
         messageLabel.font = .systemFont(ofSize: 13)
         messageLabel.textColor = .darkGray
         messageLabel.frame = NSRect(x: 22, y: 22, width: 306, height: 95)
@@ -137,6 +143,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem.separator())
         menu.addItem(withTitle: "导入 GIF 形象…", action: #selector(importAvatar), keyEquivalent: "")
         menu.addItem(withTitle: "恢复默认小鸡", action: #selector(resetAvatar), keyEquivalent: "")
+        menu.addItem(NSMenuItem.separator())
+        for option in ReviewMode.allCases {
+            let item = menu.addItem(withTitle: option.title + "模式", action: #selector(selectMode(_:)), keyEquivalent: "")
+            item.representedObject = option.rawValue
+            item.state = option == mode ? .on : .off
+            modeItems.append(item)
+        }
+        menu.addItem(withTitle: "点评最新回合（使用 Codex 用量）", action: #selector(reviewLatest), keyEquivalent: "")
+        autoItem = menu.addItem(withTitle: "回合结束后自动点评", action: #selector(toggleAutoReview), keyEquivalent: "")
+        autoItem.state = autoReview ? .on : .off
         menu.addItem(NSMenuItem.separator())
         menu.addItem(withTitle: "退出 ChimeBuddy", action: #selector(quit), keyEquivalent: "q")
         for item in menu.items { item.target = self }
@@ -169,6 +185,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return event
             }.sorted { $0.receivedAt < $1.receivedAt }
         for event in events {
+            reviewGeneration = UUID()
             if !event.simulated { lastEvent = event }
             refreshStatus()
             if paused {
@@ -181,6 +198,68 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             panel.displayIfNeeded()
             writeReceipt(["state": "displayed", "eventID": event.id, "kind": event.kind,
                           "session": event.session, "turn": event.turn, "simulated": event.simulated])
+            if !event.simulated && event.kind == "Stop" && autoReview { reviewLatest() }
+        }
+    }
+
+    @objc func selectMode(_ sender: NSMenuItem) {
+        guard let value = sender.representedObject as? String, let selected = ReviewMode(rawValue: value) else { return }
+        mode = selected
+        reviewGeneration = UUID()
+        UserDefaults.standard.set(mode.rawValue, forKey: "reviewMode")
+        for item in modeItems { item.state = (item.representedObject as? String) == mode.rawValue ? .on : .off }
+    }
+
+    @objc func toggleAutoReview() {
+        autoReview.toggle()
+        autoItem.state = autoReview ? .on : .off
+        UserDefaults.standard.set(autoReview, forKey: "autoReview")
+    }
+
+    @objc func reviewLatest() {
+        guard !paused && !reviewing else { return }
+        guard let latest = lastEvent else {
+            titleLabel.stringValue = "还没有可点评的真实消息"
+            messageLabel.stringValue = "先确认 Codex Hooks 接通。模拟事件不会发送给模型。"
+            panel.orderFrontRegardless()
+            return
+        }
+        let urls = (try? FileManager.default.contentsOfDirectory(at: inbox, includingPropertiesForKeys: nil)) ?? []
+        let history = urls.compactMap { url -> HookEvent? in
+            guard let data = try? Data(contentsOf: url) else { return nil }
+            return try? JSONDecoder().decode(HookEvent.self, from: data)
+        }.filter { !$0.simulated && $0.session == latest.session && $0.receivedAt <= latest.receivedAt }
+            .sorted { $0.receivedAt < $1.receivedAt }.suffix(6)
+        let excerpts = history.map { ["role": $0.kind == "Stop" ? "assistant" : "user", "excerpt": $0.text] }
+        guard let json = try? JSONSerialization.data(withJSONObject: excerpts), let context = String(data: json, encoding: .utf8) else { return }
+        reviewing = true
+        let generation = UUID()
+        reviewGeneration = generation
+        let selected = mode
+        titleLabel.stringValue = selected.title + "正在点评…"
+        messageLabel.stringValue = "通过本机 Codex 独立请求，不会向原聊天写入消息。"
+        panel.orderFrontRegardless()
+        let options: [ReviewMode] = selected == .both ? [.expert, .roast] : [selected]
+        let group = DispatchGroup()
+        let lock = NSLock()
+        var answers: [String: String] = [:]
+        for option in options {
+            group.enter()
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result: String
+                do { result = try CodexReviewer.review(context: context, mode: option) }
+                catch { result = error.localizedDescription }
+                lock.lock(); answers[option.rawValue] = result; lock.unlock()
+                group.leave()
+            }
+        }
+        group.notify(queue: .main) { [weak self] in
+            guard let self = self else { return }
+            self.reviewing = false
+            guard self.reviewGeneration == generation && !self.paused else { return }
+            self.titleLabel.stringValue = selected.title + "点评"
+            self.messageLabel.stringValue = options.map { $0.title + "：" + String((answers[$0.rawValue] ?? "没有返回内容").prefix(selected == .both ? 65 : 120)) }.joined(separator: "\n")
+            self.panel.orderFrontRegardless()
         }
     }
 
@@ -247,6 +326,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func togglePause() {
         paused.toggle()
+        reviewGeneration = UUID()
         UserDefaults.standard.set(paused, forKey: "displayPaused")
         pauseItem.state = paused ? .on : .off
         refreshStatus()
