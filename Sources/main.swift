@@ -61,6 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var source: DispatchSourceFileSystemObject?
     var seen = Set<String>()
     var fd: Int32 = -1
+    var hiddenByUser = false
     var avatar: NSImageView!
     var defaultFace: NSTextField!
     var connectionLabel: NSTextField!
@@ -106,7 +107,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         titleLabel = NSTextField(labelWithString: "等待 Codex 消息")
         titleLabel.font = .boldSystemFont(ofSize: 15)
         titleLabel.textColor = .black
-        titleLabel.frame = NSRect(x: 87, y: 171, width: 245, height: 25)
+        titleLabel.frame = NSRect(x: 87, y: 171, width: 213, height: 25)
+        let closeButton = NSButton(title: "×", target: self, action: #selector(hidePanel))
+        closeButton.frame = NSRect(x: 307, y: 184, width: 28, height: 28)
+        closeButton.isBordered = false
+        closeButton.font = .systemFont(ofSize: 23)
+        closeButton.contentTintColor = .darkGray
+        closeButton.toolTip = "隐藏气泡，可从菜单栏 🐥 重新打开"
+        closeButton.setAccessibilityLabel("关闭气泡")
+        view.addSubview(closeButton)
         connectionLabel = NSTextField(labelWithString: "尚未收到真实事件")
         connectionLabel.font = .systemFont(ofSize: 11)
         connectionLabel.textColor = .darkGray
@@ -132,7 +141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let screen = NSScreen.main {
             panel.setFrameOrigin(NSPoint(x: screen.visibleFrame.maxX - 380, y: screen.visibleFrame.minY + 70))
         }
-        panel.orderFrontRegardless()
+        presentPanel()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.title = "🐥"
         let menu = NSMenu()
@@ -204,7 +213,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             titleLabel.stringValue = (event.simulated ? "[模拟] " : "[Hooks] ") + (event.kind == "Stop" ? "Codex 回答结束" : "收到你的消息")
             messageLabel.stringValue = String(event.text.prefix(130))
-            panel.orderFrontRegardless()
+            presentPanel()
             panel.displayIfNeeded()
             writeReceipt(["state": "displayed", "eventID": event.id, "kind": event.kind,
                           "session": event.session, "turn": event.turn, "simulated": event.simulated])
@@ -264,7 +273,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard lastEvent != nil else {
             titleLabel.stringValue = "还没有可点评的真实消息"
             messageLabel.stringValue = "先确认 Codex Hooks 接通。模拟事件不会发送给模型。"
-            panel.orderFrontRegardless()
+            presentPanel()
             return
         }
         let history = sessions.history.suffix(6)
@@ -276,7 +285,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let selected = mode
         titleLabel.stringValue = selected.title + "正在点评…"
         messageLabel.stringValue = "通过本机 Codex 独立请求，不会向原聊天写入消息。"
-        panel.orderFrontRegardless()
+        presentPanel()
         let options: [ReviewMode] = selected == .both ? [.expert, .roast] : [selected]
         let group = DispatchGroup()
         let lock = NSLock()
@@ -297,7 +306,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard self.reviewGeneration == generation && !self.paused else { return }
             self.titleLabel.stringValue = selected.title + "点评"
             self.messageLabel.stringValue = options.map { $0.title + "：" + String((answers[$0.rawValue] ?? "没有返回内容").prefix(selected == .both ? 65 : 120)) }.joined(separator: "\n")
-            self.panel.orderFrontRegardless()
+            self.presentPanel()
         }
     }
 
@@ -340,7 +349,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             try data.write(to: storage.appendingPathComponent("avatar.gif"), options: .atomic)
             loadAvatar()
-            panel.orderFrontRegardless()
+            presentPanel()
         } catch {
             let alert = NSAlert()
             alert.messageText = "无法导入形象"
@@ -369,7 +378,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pauseItem.state = paused ? .on : .off
         refreshStatus()
     }
-    @objc func hidePanel() { panel.orderOut(nil) }
+    @objc func hidePanel() { hiddenByUser = true; panel.orderOut(nil) }
 
     func writeReceipt(_ values: [String: Any]) {
         var record = values
@@ -386,7 +395,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
     }
-    @objc func showPanel() { panel.orderFrontRegardless() }
+    func presentPanel() { if !hiddenByUser { panel.orderFrontRegardless() } }
+    @objc func showPanel() { hiddenByUser = false; presentPanel() }
     @objc func quit() { NSApp.terminate(nil) }
 }
 
