@@ -12,3 +12,5 @@ swiftc -swift-version 5 Sources/SessionStore.swift Sources/SessionTranscript.swi
 .build/observation-tests
 swiftc -swift-version 5 Sources/SessionStore.swift Sources/SessionReviews.swift Sources/RoastState.swift Tests/RoastStateTests.swift -o .build/roast-state-tests
 .build/roast-state-tests
+swiftc -swift-version 5 Sources/ModelPreferences.swift Tests/ModelPreferencesTests.swift -o .build/model-preferences-tests
+.build/model-preferences-tests
