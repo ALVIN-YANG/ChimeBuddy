@@ -70,6 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var pauseItem: NSMenuItem!
     var paused = UserDefaults.standard.bool(forKey: "displayPaused")
     let sessions = SessionStore()
+    let savedReviews = SessionReviews(directory: storage)
     var lastEvent: HookEvent? { sessions.latest }
     var sessionLabel: NSTextField!
     var mode = ReviewMode(rawValue: UserDefaults.standard.string(forKey: "reviewMode") ?? "expert") ?? .expert
@@ -261,6 +262,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         avatar.setMood(event.kind == "Stop" ? .idle : .thinking)
         titleLabel.stringValue = event.kind == "Stop" ? "要听听我的看法吗？" : "我在听"
         messageLabel.stringValue = event.kind == "Stop" ? "回复已结束。可以听专家建议，也可以来一句吐槽。" : "这条对话我跟上了。等回复结束，我再给你第二意见。"
+        restoreReview()
         presentPanel()
         panel.displayIfNeeded()
         writeReceipt(["state": identityResolved ? "identityResolved" : "displayed", "eventID": event.id,
@@ -328,6 +330,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         reviewGeneration = UUID()
         UserDefaults.standard.set(mode.rawValue, forKey: "reviewMode")
         for item in modeItems { item.state = (item.representedObject as? String) == mode.rawValue ? .on : .off }
+        if !restoreReview() {
+            titleLabel.stringValue = mode.title + "模式"
+            messageLabel.stringValue = "这个会话还没有该模式的点评。"
+        }
+        presentPanel()
+    }
+
+    @discardableResult func restoreReview() -> Bool {
+        guard let id = sessions.selectedID, let saved = savedReviews.review(sessionID: id, mode: mode.rawValue) else { return false }
+        let stale = saved.eventID != lastEvent?.id
+        titleLabel.stringValue = (stale ? "上次" : "") + mode.title + "点评"
+        messageLabel.stringValue = saved.text
+        avatar.setMood(.idle)
+        writeReceipt(["state": "reviewRestored", "contextSession": id, "stale": stale])
+        return true
     }
 
     @objc func toggleAutoReview() {
@@ -353,6 +370,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let history = sessions.history.suffix(6)
         let contextSessionID = sessions.selectedID
         let contextEventID = lastEvent?.id
+        let contextEventDate = lastEvent!.receivedAt
         let excerpts = history.map { ["role": $0.kind == "Stop" ? "assistant" : "user", "excerpt": $0.text] }
         guard let json = try? JSONSerialization.data(withJSONObject: excerpts), let context = String(data: json, encoding: .utf8) else { return }
         reviewing = true
@@ -368,19 +386,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let group = DispatchGroup()
         let lock = NSLock()
         var answers: [String: String] = [:]
+        var succeeded = Set<String>()
         for option in options {
             group.enter()
             DispatchQueue.global(qos: .userInitiated).async {
                 let result: String
-                do { result = try CodexReviewer.review(context: context, mode: option) }
+                var success = false
+                do { result = try CodexReviewer.review(context: context, mode: option); success = true }
                 catch { result = error.localizedDescription }
-                lock.lock(); answers[option.rawValue] = result; lock.unlock()
+                lock.lock()
+                answers[option.rawValue] = result
+                if success { succeeded.insert(option.rawValue) }
+                lock.unlock()
                 group.leave()
             }
         }
         group.notify(queue: .main) { [weak self] in
             guard let self = self else { return }
             self.reviewing = false
+            let text = options.map { $0.title + "：" + String((answers[$0.rawValue] ?? "没有返回内容").prefix(selected == .both ? 55 : 100)) }.joined(separator: "\n")
+            if succeeded.count == options.count, let id = contextSessionID, let eventID = contextEventID {
+                do {
+                    try self.savedReviews.save(SavedReview(sessionID: id, mode: selected.rawValue, eventID: eventID,
+                                                          eventDate: contextEventDate, text: text))
+                } catch {
+                    self.writeReceipt(["state": "reviewSaveFailed", "contextSession": id])
+                }
+            }
             self.writeReceipt(["state": "reviewCompleted", "contextSession": contextSessionID ?? "",
                                "responseLengths": answers.mapValues { $0.count }, "discarded": self.reviewGeneration != generation])
             if let pending = self.pendingReviewEventID {
@@ -395,7 +427,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                   self.lastEvent?.id == contextEventID else { return }
             self.avatar.setMood(.speaking)
             self.titleLabel.stringValue = selected.title + "点评"
-            self.messageLabel.stringValue = options.map { $0.title + "：" + String((answers[$0.rawValue] ?? "没有返回内容").prefix(selected == .both ? 55 : 100)) }.joined(separator: "\n")
+            self.messageLabel.stringValue = text
             self.presentPanel()
         }
     }

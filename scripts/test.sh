@@ -6,3 +6,5 @@ swiftc -swift-version 5 Sources/SessionStore.swift Tests/SessionStoreTests.swift
 .build/session-tests
 swiftc -swift-version 5 Sources/CompanionAnimation.swift Tests/CompanionAnimationTests.swift -o .build/animation-tests
 .build/animation-tests
+swiftc -swift-version 5 Sources/SessionReviews.swift Tests/SessionReviewsTests.swift -o .build/review-tests
+.build/review-tests
