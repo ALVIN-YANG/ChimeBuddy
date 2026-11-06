@@ -14,6 +14,7 @@ struct HookEvent: Codable {
 final class SessionStore {
     private(set) var events: [HookEvent] = []
     private(set) var selectedID: String?
+    private var titles: [String: String] = [:]
     init(selectedID: String? = nil) { self.selectedID = selectedID }
     var sessions: [String] { Array(Set(events.filter { !$0.simulated }.map { $0.session })).sorted() }
     var latest: HookEvent? { history.last }
@@ -27,10 +28,11 @@ final class SessionStore {
         return !event.simulated && event.session == selectedID
     }
     func select(_ id: String) { selectedID = id }
+    func updateTitle(_ title: String?, for id: String) {
+        let value = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        titles[id] = value?.isEmpty == false ? value : nil
+    }
     func title(for id: String) -> String {
-        let first = events.filter { !$0.simulated && $0.session == id && $0.kind == "UserPromptSubmit" }
-            .sorted { $0.receivedAt < $1.receivedAt }.first
-        let text = first?.text.replacingOccurrences(of: "\n", with: " ") ?? "未收到用户消息"
-        return String(text.prefix(16)) + " · " + String(id.prefix(8))
+        titles[id] ?? "未命名会话 · " + String(id.prefix(8))
     }
 }

@@ -20,6 +20,14 @@ import Foundation
         assert(!store.receive(event("b2", "B", 4)))
         assert(store.history.map(\.id) == ["b1", "b2"])
         assert(store.sessions == ["A", "B"])
+        store.updateTitle("Codex 中的真实标题", for: "A")
+        assert(store.title(for: "A") == "Codex 中的真实标题")
+        store.updateTitle("重命名后的标题", for: "A")
+        assert(store.title(for: "A") == "重命名后的标题")
+        assert(store.selectedID == "B")
+        store.updateTitle(nil, for: "A")
+        assert(store.title(for: "A") == "未命名会话 · A")
+        assert(store.title(for: "B") == "未命名会话 · B")
         print("PASS: simulated isolation, selection, background isolation, history isolation, deduplication")
     }
 }

@@ -53,7 +53,7 @@ final class BuddyPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var panel: BuddyPanel!
     var statusItem: NSStatusItem!
     var titleLabel: NSTextField!
@@ -75,6 +75,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var autoItem: NSMenuItem!
     var reviewing = false
     var reviewGeneration = UUID()
+    var refreshingTitles = false
+    var titleSessionIDs: [String] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -129,6 +131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sessionPicker.font = .systemFont(ofSize: 11)
         sessionPicker.target = self
         sessionPicker.action = #selector(selectSession)
+        sessionPicker.menu?.delegate = self
         view.addSubview(sessionPicker)
         let settings = NSButton(title: "", target: self, action: #selector(showSettings))
         settings.frame = NSRect(x: 374, y: 10, width: 28, height: 26)
@@ -243,11 +246,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if sessions.sessions.isEmpty { sessionPicker.addItem(withTitle: "等待真实会话 · 手动选择") }
         if let id = sessions.selectedID { UserDefaults.standard.set(id, forKey: "selectedSession") }
+        if titleSessionIDs != sessions.sessions { refreshTitles() }
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        if menu === sessionPicker.menu { refreshTitles() }
+    }
+
+    func refreshTitles() {
+        guard !refreshingTitles else { return }
+        refreshingTitles = true
+        let ids = sessions.sessions
+        titleSessionIDs = ids
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let result = Result { try CodexThreadTitles.fetch(ids: ids) }
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.refreshingTitles = false
+                if case .success(let titles) = result {
+                    for title in titles { self.sessions.updateTitle(title.name, for: title.id) }
+                    // Keep menu items and selection in place while the menu is open.
+                    for item in self.sessionPicker.itemArray {
+                        if let id = item.representedObject as? String {
+                            item.title = self.sessions.title(for: id)
+                            item.toolTip = item.title + "\n" + id
+                        }
+                    }
+                    self.sessionPicker.toolTip = self.sessions.selectedID.map { self.sessions.title(for: $0) + "\n" + $0 }
+                } else {
+                    self.sessionPicker.toolTip = "会话名刷新失败，重新打开列表重试"
+                }
+                if ids != self.sessions.sessions { self.refreshTitles() }
+            }
+        }
     }
 
     @objc func selectSession() {
         guard let id = sessionPicker.selectedItem?.representedObject as? String else { return }
         sessions.select(id)
+        sessionPicker.toolTip = sessions.title(for: id) + "\n" + id
         reviewGeneration = UUID()
         UserDefaults.standard.set(id, forKey: "selectedSession")
         refreshStatus()
