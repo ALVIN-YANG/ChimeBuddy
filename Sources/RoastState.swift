@@ -11,7 +11,6 @@ struct RoastRequest {
 final class RoastState {
     let sessions: SessionStore
     let cache: SessionReviews
-    var paused = false
     private var requested = Set<String>()
     init(sessions: SessionStore = SessionStore(), cache: SessionReviews) { self.sessions = sessions; self.cache = cache }
     var text: String? {
@@ -19,7 +18,7 @@ final class RoastState {
         return Self.clean(saved.text)
     }
     func receive(_ event: HookEvent, live: Bool) -> RoastRequest? {
-        guard sessions.receive(event), live, !paused,
+        guard sessions.receive(event), live,
               !requested.contains(event.deliveryKey),
               cache.review(sessionID: event.session, mode: "roast")?.eventID != event.deliveryKey else { return nil }
         // Do not request a stale boundary delivered after a newer user/finish.
@@ -32,7 +31,7 @@ final class RoastState {
         return RoastRequest(event: event, context: context)
     }
     func canStart(_ request: RoastRequest) -> Bool {
-        !paused && sessions.selectedID == request.event.session
+        sessions.selectedID == request.event.session
     }
     func complete(_ request: RoastRequest, text: String) throws {
         let value = Self.clean(text)

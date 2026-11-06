@@ -60,7 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var closeButton: NSButton!
     var avatar: CompanionAvatarView!
     var buddySurface: BuddySurface!
-    var pauseItem: NSMenuItem!
+    var settingsController: SettingsWindowController?
     var hiddenByUser = false
     var collapsedByUser = false
     let state = RoastState(cache: SessionReviews(directory: storage))
@@ -88,7 +88,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        state.paused = UserDefaults.standard.bool(forKey: "roastPaused")
         panel = BuddyPanel(contentRect: NSRect(x: 0, y: 0, width: 440, height: 282),
                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.title = "ChimeBuddy"
@@ -132,11 +131,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         menu.addItem(withTitle: "显示伙伴", action: #selector(showPanel), keyEquivalent: "")
         menu.addItem(withTitle: "隐藏伙伴", action: #selector(hidePanel), keyEquivalent: "")
-        pauseItem = menu.addItem(withTitle: "暂停自动吐槽", action: #selector(togglePause), keyEquivalent: "")
-        pauseItem.state = state.paused ? .on : .off
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(withTitle: "导入 GIF 形象…", action: #selector(importAvatar), keyEquivalent: "")
-        menu.addItem(withTitle: "恢复默认 Codex 伙伴", action: #selector(resetAvatar), keyEquivalent: "")
+        menu.addItem(withTitle: "设置…", action: #selector(showSettings), keyEquivalent: ",")
         menu.addItem(NSMenuItem.separator())
         menu.addItem(withTitle: "退出 ChimeBuddy", action: #selector(quit), keyEquivalent: "q")
         for item in menu.items { item.target = self }
@@ -164,6 +160,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.timer = timer
         writeReceipt(["state": "ready", "pid": ProcessInfo.processInfo.processIdentifier])
         poll()
+        if CommandLine.arguments.contains("--settings") { showSettings() }
     }
 
     func poll() {
@@ -328,12 +325,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setSpeechVisible(!collapsedByUser && !messageLabel.stringValue.isEmpty)
         writeReceipt(["state": collapsedByUser ? "speechCollapsed" : "speechExpanded"])
     }
-    @objc func togglePause() {
-        state.paused.toggle()
-        UserDefaults.standard.set(state.paused, forKey: "roastPaused")
-        pauseItem.state = state.paused ? .on : .off
-        if state.paused { reviews.cancelAllOperations() }
-        render()
+    @objc func showSettings() {
+        if settingsController == nil {
+            let controller = SettingsWindowController()
+            controller.onImport = { [weak self] in self?.importAvatar() }
+            controller.onReset = { [weak self] in self?.resetAvatar() }
+            settingsController = controller
+        }
+        settingsController?.update(customURL: storage.appendingPathComponent("avatar.gif"))
+        settingsController?.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        settingsController?.window?.makeKeyAndOrderFront(nil)
     }
     @objc func hidePanel() { hiddenByUser = true; panel.orderOut(nil) }
     @objc func showPanel() { hiddenByUser = false; presentPanel() }
@@ -366,6 +368,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             avatar.image = NSImage(systemSymbolName: "terminal", accessibilityDescription: "Codex 伙伴")
         }
+        settingsController?.update(customURL: custom)
     }
 
     @objc func importAvatar() {
@@ -375,7 +378,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         picker.allowsMultipleSelection = false
         picker.canChooseDirectories = false
         NSApp.activate(ignoringOtherApps: true)
-        guard picker.runModal() == .OK, let url = picker.url else { return }
+        guard let window = settingsController?.window else { return }
+        picker.beginSheetModal(for: window) { [weak self] result in
+            guard result == .OK, let url = picker.url else { return }
+            self?.installAvatar(at: url)
+        }
+    }
+
+    func installAvatar(at url: URL) {
         do {
             let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
             guard let size = attributes[.size] as? NSNumber, size.intValue <= 20_000_000 else {
@@ -393,7 +403,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let alert = NSAlert()
             alert.messageText = "无法导入形象"
             alert.informativeText = error.localizedDescription
-            alert.runModal()
+            if let window = settingsController?.window { alert.beginSheetModal(for: window) }
         }
     }
 
@@ -404,7 +414,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             loadAvatar()
         } catch {
             let alert = NSAlert(error: error)
-            alert.runModal()
+            if let window = settingsController?.window { alert.beginSheetModal(for: window) }
         }
     }
 

@@ -32,14 +32,12 @@ import Foundation
         try state.complete(a, text: "过期结果")
         assert(state.text == "回复完成后的新吐槽")
         assert(state.receive(event("sim", "A", 5, simulated: true), live: true) == nil)
-        state.paused = true
-        assert(state.receive(event("paused", "A", 6), live: true) == nil)
         state.sessions.select(nil)
         assert(state.text == nil)
         let restart = RoastState(cache: SessionReviews(directory: directory))
         restart.sessions.select("A")
         assert(restart.text == "回复完成后的新吐槽", "Cache persists across restart")
         assert(restart.receive(event("a-finish", "A", 4, kind: "Stop"), live: true) == nil, "Cached completion does not spend model usage twice")
-        print("PASS: user and completion triggers, startup/background/simulation/pause exclusion, isolated request context, late result guard, cache restore and restart deduplication")
+        print("PASS: user and completion triggers, startup/background/simulation exclusion, isolated request context, late result guard, cache restore and restart deduplication")
     }
 }
