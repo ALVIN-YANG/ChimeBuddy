@@ -45,7 +45,7 @@ import Foundation
         store.updateTitle("重命名后的标题", for: "A")
         assert(store.title(for: "A") == "重命名后的标题")
         store.updateTitle(nil, for: "A")
-        assert(store.title(for: "A") == "未命名会话 · A")
+        assert(store.title(for: "A") == "重命名后的标题", "Temporary missing metadata must keep the known title")
         print("PASS: prompt-follow, background reply isolation, context isolation, switch back, out-of-order restore, deduplication, titles")
     }
 }

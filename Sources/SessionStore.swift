@@ -47,7 +47,7 @@ final class SessionStore {
     }
     func updateTitle(_ title: String?, for id: String) {
         let value = title?.trimmingCharacters(in: .whitespacesAndNewlines)
-        titles[id] = value?.isEmpty == false ? value : nil
+        if let value = value, !value.isEmpty { titles[id] = value }
     }
     func title(for id: String) -> String {
         titles[id] ?? "未命名会话 · " + String(id.prefix(8))
