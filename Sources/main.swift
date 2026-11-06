@@ -53,7 +53,7 @@ final class BuddyPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate {
     var panel: BuddyPanel!
     var statusItem: NSStatusItem!
     var titleLabel: NSTextField!
@@ -66,14 +66,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var connectionLabel: NSTextField!
     var pauseItem: NSMenuItem!
     var paused = UserDefaults.standard.bool(forKey: "displayPaused")
-    let sessions = SessionStore(selectedID: UserDefaults.standard.string(forKey: "selectedSession"))
+    let sessions = SessionStore()
     var lastEvent: HookEvent? { sessions.latest }
-    var sessionPicker: NSPopUpButton!
+    var sessionLabel: NSTextField!
     var mode = ReviewMode(rawValue: UserDefaults.standard.string(forKey: "reviewMode") ?? "expert") ?? .expert
     var modeItems: [NSMenuItem] = []
     var autoReview = UserDefaults.standard.bool(forKey: "autoReview")
     var autoItem: NSMenuItem!
     var reviewing = false
+    var pendingReviewEventID: String?
     var reviewGeneration = UUID()
     var refreshingTitles = false
     var titleSessionIDs: [String] = []
@@ -119,7 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         connectionLabel.font = .systemFont(ofSize: 11)
         connectionLabel.textColor = .secondaryLabelColor
         connectionLabel.frame = NSRect(x: 152, y: 172, width: 246, height: 17)
-        messageLabel = NSTextField(wrappingLabelWithString: "在这里查看建议与吐槽。\n选择会话后，从设置开始点评。")
+        messageLabel = NSTextField(wrappingLabelWithString: "在这里查看建议与吐槽。\n在哪个会话发送消息，我就跟到哪里。")
         messageLabel.font = .systemFont(ofSize: 13)
         messageLabel.textColor = .labelColor
         messageLabel.frame = NSRect(x: 152, y: 57, width: 246, height: 102)
@@ -127,13 +128,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         view.addSubview(connectionLabel)
         view.addSubview(titleLabel)
         view.addSubview(messageLabel)
-        sessionPicker = NSPopUpButton(frame: NSRect(x: 16, y: 10, width: 342, height: 26))
-        sessionPicker.isBordered = false
-        sessionPicker.font = .systemFont(ofSize: 11)
-        sessionPicker.target = self
-        sessionPicker.action = #selector(selectSession)
-        sessionPicker.menu?.delegate = self
-        view.addSubview(sessionPicker)
+        sessionLabel = NSTextField(labelWithString: "等待你发送消息")
+        sessionLabel.frame = NSRect(x: 18, y: 14, width: 340, height: 18)
+        sessionLabel.font = .systemFont(ofSize: 11)
+        sessionLabel.textColor = .secondaryLabelColor
+        sessionLabel.lineBreakMode = .byTruncatingTail
+        view.addSubview(sessionLabel)
         let settings = NSButton(title: "", target: self, action: #selector(showSettings))
         settings.frame = NSRect(x: 374, y: 10, width: 28, height: 26)
         settings.image = NSImage(systemSymbolName: "slider.horizontal.3", accessibilityDescription: "设置")
@@ -186,7 +186,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         refreshStatus()
         if let event = lastEvent {
-            titleLabel.stringValue = "已载入固定会话"
+            titleLabel.stringValue = "已跟随最近发消息的会话"
             messageLabel.stringValue = String(event.text.prefix(130))
         }
         fd = open(inbox.path, O_EVTONLY)
@@ -220,15 +220,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 return event
             }.sorted { $0.receivedAt < $1.receivedAt }
         for event in events {
+            let previousSessionID = sessions.selectedID
             let affectsSelection = sessions.receive(event)
             refreshSessions()
+            if event.kind == "UserPromptSubmit" && affectsSelection { refreshTitles() }
             guard affectsSelection else {
                 writeReceipt(["state": "receivedInBackground", "eventID": event.id, "simulated": event.simulated])
                 continue
             }
             reviewGeneration = UUID()
+            pendingReviewEventID = nil
             refreshStatus()
             if paused {
+                if previousSessionID != sessions.selectedID {
+                    titleLabel.stringValue = "已跟随新的会话"
+                    messageLabel.stringValue = "消息显示已暂停，恢复后可点评此会话。"
+                }
                 writeReceipt(["state": "receivedWhilePaused", "eventID": event.id, "simulated": event.simulated])
                 continue
             }
@@ -243,22 +250,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func refreshSessions() {
-        sessionPicker.removeAllItems()
-        if let id = sessions.selectedID, !sessions.sessions.contains(id) {
-            sessionPicker.addItem(withTitle: "所选会话暂不可用 · " + String(id.prefix(8)))
+        if let id = sessions.selectedID {
+            sessionLabel.stringValue = sessions.title(for: id)
+            sessionLabel.toolTip = sessionLabel.stringValue + "\n" + id
+        } else {
+            sessionLabel.stringValue = "等待你发送消息"
+            sessionLabel.toolTip = "仅用户发送消息时自动切换，不跟随后台回复"
         }
-        for id in sessions.sessions {
-            sessionPicker.addItem(withTitle: sessions.title(for: id))
-            sessionPicker.lastItem?.representedObject = id
-            if id == sessions.selectedID { sessionPicker.select(sessionPicker.lastItem) }
-        }
-        if sessions.sessions.isEmpty { sessionPicker.addItem(withTitle: "等待真实会话 · 手动选择") }
-        if let id = sessions.selectedID { UserDefaults.standard.set(id, forKey: "selectedSession") }
         if titleSessionIDs != sessions.sessions { refreshTitles() }
-    }
-
-    func menuWillOpen(_ menu: NSMenu) {
-        if menu === sessionPicker.menu { refreshTitles() }
     }
 
     func refreshTitles() {
@@ -273,31 +272,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.refreshingTitles = false
                 if case .success(let titles) = result {
                     for title in titles { self.sessions.updateTitle(title.name, for: title.id) }
-                    // Keep menu items and selection in place while the menu is open.
-                    for item in self.sessionPicker.itemArray {
-                        if let id = item.representedObject as? String {
-                            item.title = self.sessions.title(for: id)
-                            item.toolTip = item.title + "\n" + id
-                        }
-                    }
-                    self.sessionPicker.toolTip = self.sessions.selectedID.map { self.sessions.title(for: $0) + "\n" + $0 }
+                    self.refreshSessions()
                 } else {
-                    self.sessionPicker.toolTip = "会话名刷新失败，重新打开列表重试"
+                    self.sessionLabel.toolTip = "会话名刷新失败，下次消息时重试"
+                    self.titleSessionIDs = []
                 }
                 if ids != self.sessions.sessions { self.refreshTitles() }
             }
         }
-    }
-
-    @objc func selectSession() {
-        guard let id = sessionPicker.selectedItem?.representedObject as? String else { return }
-        sessions.select(id)
-        sessionPicker.toolTip = sessions.title(for: id) + "\n" + id
-        reviewGeneration = UUID()
-        UserDefaults.standard.set(id, forKey: "selectedSession")
-        refreshStatus()
-        titleLabel.stringValue = "已切换观察会话"
-        messageLabel.stringValue = String((lastEvent?.text ?? "等待此会话的消息").prefix(130))
     }
 
     @objc func showSettings() {
@@ -321,8 +303,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func reviewLatest() {
         guard !paused else { return }
         guard !reviewing else {
-            titleLabel.stringValue = "上次点评尚未结束"
-            messageLabel.stringValue = "旧结果不会覆盖已切换的会话，请稍后再试。"
+            pendingReviewEventID = lastEvent?.id
+            titleLabel.stringValue = "等待当前会话点评"
+            messageLabel.stringValue = "上一条点评结束后，会使用当前会话的上下文。"
             return
         }
         guard lastEvent != nil else {
@@ -332,6 +315,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         let history = sessions.history.suffix(6)
+        let contextSessionID = sessions.selectedID
+        let contextEventID = lastEvent?.id
         let excerpts = history.map { ["role": $0.kind == "Stop" ? "assistant" : "user", "excerpt": $0.text] }
         guard let json = try? JSONSerialization.data(withJSONObject: excerpts), let context = String(data: json, encoding: .utf8) else { return }
         reviewing = true
@@ -358,7 +343,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         group.notify(queue: .main) { [weak self] in
             guard let self = self else { return }
             self.reviewing = false
-            guard self.reviewGeneration == generation && !self.paused else { return }
+            if let pending = self.pendingReviewEventID {
+                self.pendingReviewEventID = nil
+                if pending == self.lastEvent?.id && !self.paused {
+                    self.reviewLatest()
+                    return
+                }
+            }
+            guard self.reviewGeneration == generation && !self.paused,
+                  self.sessions.selectedID == contextSessionID,
+                  self.lastEvent?.id == contextEventID else { return }
             self.titleLabel.stringValue = selected.title + "点评"
             self.messageLabel.stringValue = options.map { $0.title + "：" + String((answers[$0.rawValue] ?? "没有返回内容").prefix(selected == .both ? 65 : 120)) }.joined(separator: "\n")
             self.presentPanel()
@@ -370,7 +364,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             connectionLabel.stringValue = "已暂停显示 · 仍在本地接收事件"
         } else if let event = lastEvent {
             let time = DateFormatter.localizedString(from: event.receivedAt, dateStyle: .none, timeStyle: .short)
-            connectionLabel.stringValue = "固定会话 · 最近事件 \(time)"
+            connectionLabel.stringValue = "跟随发送 · 最近事件 \(time)"
         } else {
             connectionLabel.stringValue = "尚未收到真实事件"
         }
@@ -441,6 +435,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         record["timestamp"] = ISO8601DateFormatter().string(from: Date())
         record["windowNumber"] = panel.windowNumber
         record["windowVisible"] = panel.isVisible
+        record["followedSession"] = sessions.selectedID
         if let data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]) {
             let url = storage.appendingPathComponent("receipts.jsonl")
             if !FileManager.default.fileExists(atPath: url.path) { FileManager.default.createFile(atPath: url.path, contents: nil, attributes: [.posixPermissions: 0o600]) }

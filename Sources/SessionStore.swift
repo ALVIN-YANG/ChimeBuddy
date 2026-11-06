@@ -10,12 +10,12 @@ struct HookEvent: Codable {
     let simulated: Bool
 }
 
-/// Selection is explicit. Background events never change the selected session.
+/// Follow the latest user submission, never a background assistant reply.
 final class SessionStore {
     private(set) var events: [HookEvent] = []
     private(set) var selectedID: String?
     private var titles: [String: String] = [:]
-    init(selectedID: String? = nil) { self.selectedID = selectedID }
+    private var latestPrompt: HookEvent?
     var sessions: [String] { Array(Set(events.filter { !$0.simulated }.map { $0.session })).sorted() }
     var latest: HookEvent? { history.last }
     var history: [HookEvent] {
@@ -24,10 +24,15 @@ final class SessionStore {
     @discardableResult func receive(_ event: HookEvent) -> Bool {
         guard !events.contains(where: { $0.id == event.id }) else { return false }
         events.append(event)
-        if selectedID == nil && !event.simulated { selectedID = event.session }
+        if !event.simulated && event.kind == "UserPromptSubmit" {
+            if latestPrompt == nil || event.receivedAt > latestPrompt!.receivedAt ||
+                (event.receivedAt == latestPrompt!.receivedAt && event.id > latestPrompt!.id) {
+                latestPrompt = event
+                selectedID = event.session
+            }
+        }
         return !event.simulated && event.session == selectedID
     }
-    func select(_ id: String) { selectedID = id }
     func updateTitle(_ title: String?, for id: String) {
         let value = title?.trimmingCharacters(in: .whitespacesAndNewlines)
         titles[id] = value?.isEmpty == false ? value : nil
