@@ -1,79 +1,70 @@
-# ChimeBuddy 原生验证
+# ChimeBuddy
 
-原生 Swift / AppKit 桌面伴侣：Codex Hooks → 本地事件 → 悬浮气泡。支持自定义 GIF、专家/吐槽/双开模式，点评通过桌面内置 Codex CLI 发起。
+原生 Swift / AppKit Codex 桌面伙伴。点击 Codex 中的会话时切换上下文；当前会话收到用户消息或 AI 最终回复时自动吐槽。气泡只有会话名称、吐槽正文和隐藏按钮。没有吐槽缓存时只显示角色。
 
-## 运行
+## 运行与检查
 
 ```sh
+bash scripts/test.sh
 bash scripts/build.sh
 open .build/ChimeBuddy.app
 ```
 
-本机项目路径固定为 `/Users/USER/Documents/my-learn/ChimeBuddy`。移动项目时，需要同时修改 `Sources/main.swift` 的工作目录过滤值和 `.codex/hooks.json` 的可执行文件路径。
+检查当前识别的会话和缓存，不调用模型：
 
-项目级 `.codex/hooks.json` 注册 `UserPromptSubmit` 和 `Stop`。在 Codex Settings → Hooks 或 Review hooks 信任两项后，在此项目聊天发送一句话。用户消息应显示 `[Hooks] 收到你的消息`；回合结束应显示 `[Hooks] Codex 回答结束`。如果 Hooks 未出现，检查项目是否受信任，以及当前会话是否重新加载了项目配置；不要使用绕过信任的启动参数。
+```sh
+bash scripts/check-current.sh
+```
 
-窗口使用非激活 `NSPanel`，配置 `canJoinAllSpaces`、`fullScreenAuxiliary`、`canJoinAllApplications`。用户已确认当前 Codex 全屏时仍可见；多屏和其他桌面切换效果未验证。此版本全局悬浮，不跟踪 Codex 窗口边缘，也不只在 Codex 前台显示。
+显式重放当前会话最新的一条真实消息，测试模型和缓存链路（使用 Codex 用量，不向原聊天发消息）：
 
-## 菜单栏功能
+```sh
+bash scripts/check-current.sh --roast
+```
 
-- 仅真实 `UserPromptSubmit` 自动切换跟随会话，`Stop` 和其他后台事件不能切走伙伴。移除手动会话选择，底部只显示当前会话名称。
-- 点评上下文仅取跟随会话最近 6 条消息，切回时恢复该会话自己的历史；旧会话的在途点评不能覆盖新会话。新点评若需等待旧请求完成，只处理仍匹配当前消息的请求。
-- 重启按最新用户消息的时间恢复会话，不依赖磁盘文件枚举顺序。仅点击 Codex 中另一个会话页面但未发消息时，不会切换。
-- 当前只接入 ChimeBuddy 项目下已启用 Hooks 的会话。其他项目尚未接入，不扫描它们的历史。
-- 气泡内的“设置”按钮与菜单栏 ChimeBuddy 提供相同菜单。
-- 导入 GIF：选择不超过 20 MB 的有效 GIF，复制到应用数据目录，重启后恢复；可恢复默认 Codex 伙伴。
-- 暂停消息显示：暂停弹出，仍在本地接收事件；不是停用 Hooks。
-- 专家、吐槽、双开：双开并发两次独立请求。默认专家模式。
-- 点评最新回合：取最近真实事件所属会话最多 6 条摘录，每条最多 500 字符；不混入其他会话或模拟事件。
-- 自动点评：默认关闭，手动开启后在真实 `Stop` 事件触发；正在点评时不排队，过期结果不覆盖新消息。
+检查脚本修改缓存后，重开伙伴即可读取它。日常自动触发不需要运行脚本。
 
-点评复用本机 Codex 的 ChatGPT 登录，不读取或复制凭据，不需要 API Key。它使用 Codex 用量，独立于当前聊天；目前使用 CLI 默认模型（本机测试为 `gpt-6.1-sol`），不自动继承当前聊天的模型选择。执行目录为独立临时目录，使用只读沙箱、临时会话并要求不调用工具，不续写原聊天。`--ignore-user-config` 避免携带用户项目配置，登录仍由 CLI 管理。只读沙箱不是“完全不能读文件”的保证。
+## 当前行为
 
-## 数据和退出
+- 页面路由决定当前会话。用户消息、后台回复和内部临时任务都不能改变选择。
+- 切换时立即清除上一会话的气泡，恢复新会话自己的缓存；未生成过则只显示角色。点击切换本身不调用模型。
+- 只在当前会话的新用户消息、最终回复完成时自动调用模型。中间回复、工具输出、思考过程、历史补载和模拟事件不触发。
+- 同一回合的多条用户输入使用独立消息 item ID；完成事件使用 turn ID。重复读取、切回和重启不重复生成。
+- 上下文只包含这个会话最近最多 6 条用户消息与最终回复，每条最多 2000 字符。仅启动或切换时补载当前文件尾部最多 4 MiB；随后增量读取。
+- 在途结果属于发起请求的会话。离开后完成只存入原会话缓存，不能显示到新会话，也不能覆盖较新结果。尚未开始的旧会话请求取消。
+- 等待或失败时保留已有吐槽；没有缓存就不显示气泡。状态、引导和错误只进诊断记录。
+- 伙伴仅在 Codex 前台且确认当前会话时显示。角色可拖动、点击收起/展开气泡；右上角隐藏整个伙伴，菜单栏可恢复。
+- 菜单栏提供暂停自动吐槽、导入 GIF、恢复默认角色和退出。没有手动选择会话、模式选择或点评按钮。
+- 默认角色有待机眨眼、思考和说话表情；系统减少动态效果时静止。自定义 GIF 优先保留。
 
-- Hooks 接收和 GIF 功能仅在本地运行；用户发起或开启自动点评后，摘录通过 Codex 发送给模型，不修改原聊天。
-- 仅接受上述固定工作目录的两种事件，每条最多保存 500 个字符，气泡最多显示 130 个字符。
-- 事件保存在 `~/Library/Application Support/ChimeBuddy/events/`，窗口处理回执在同目录的 `receipts.jsonl`；这是本地验证数据，不会自动清理。
-- `last-hook-invocation.json` 只记录最近入口调用的时间、输入字节数及模拟标记，用于区分未调用和被过滤；不保存被拒绝的正文。
-- 菜单栏 ChimeBuddy → 退出 ChimeBuddy。停止 Hook 接入时，在 Codex 禁用这两项或移除此项目的 `.codex/hooks.json`。
-- `--hook --simulate` 只测试接收入口，模拟事件不加入会话列表，也不发送给模型，不能作为真实 Codex 接入证据。
+自动吐槽默认启用。一次用户输入和一次最终回复各可调用一次 Codex，使用本机已有 ChatGPT 登录和用量。调用在独立临时目录、只读沙箱、临时会话中执行，不续写原聊天、不复制凭据、不需要 API Key。模型使用 CLI 默认选择，不继承当前聊天的模型设置。提示词要求不用工具；只读沙箱不等于文件读取完全禁用。
 
-## 本机验证（2026-11-05）
+## 观察来源与边界
 
-- 桌面应用：`/Applications/ChatGPT.app`，Bundle ID `com.openai.codex`，版本 `26.1029.61003`（24614）。
-- 桌面内置引擎：`0.166.0-alpha.6`；`features list` 返回 `hooks stable true`。
-- Swift 6.3.3 编译、应用启动成功。
-- 模拟事件经同一原生 Hook 入口写入，文件监听收到并显示气泡；通过窗口可访问性树确认 `[模拟] 收到你的消息` 及模拟正文。
-- 全屏显示：用户确认 Codex 全屏后气泡仍可见。
-- 模型：ChatGPT 登录检查通过；独立 CLI 请求返回 `CHIMEBUDDY_OK`；生产 `CodexReviewer.review` 入口用虚构对话实际调用成功，返回专家建议。
-- Hooks：用桌面内置引擎的公开 `hooks/list` 读到两项 `enabled: true`、`trustStatus: trusted`，无配置错误。两次独立 `codex exec` 探针均实际触发用户消息和回合结束事件，窗口回执和 UI 已验证。未绕过 Hooks 信任。
-- 当前桌面聊天：2026-11-06 已收到本聊天真实消息；在桌宠选择“调研 Codex 对话助手可行性”后，实际窗口显示了用户关于会话名的最新反馈，桌面消息到气泡链路已验证。
-- GIF：通过原生文件选择器实际导入两帧 GIF，截图确认两帧播放，恢复默认形象已验证。
-- 双开：从桌宠菜单实际并发调用，窗口收到专家和吐槽两项输出。
-- 会话隔离：第二个实际 CLI 会话的两项事件记录为 `receivedInBackground`，未覆盖第一个会话的点评；在下拉框选择第二个会话后显示 `SECOND_SESSION_OK`。
-- `bash scripts/test.sh` 验证模拟隔离、后台隔离、选中会话历史、排序与去重。详情见 [验收记录](docs/verification/2026-11-05.md)。
+当前安装的 Codex `26.1029.61003` 在桌面日志中输出页面路由，但不输出开源示例使用的窗口焦点字段。伙伴读取当前 Codex 主进程的 `IAB_LIFECYCLE received browser sidebar owner sync` 记录里的 `ownerRoutePath=/local/<UUID>`，再通过公开 `thread/read` 验证真实会话、读取名称及记录路径。这个日志名称来自宿主内部路由，伙伴界面仍是原生 NSPanel，不使用内置浏览器。
 
-参考：[Codex Hooks](https://learn.chatgpt.com/docs/hooks)、[Apple 全屏空间行为](https://developer.apple.com/documentation/appkit/nswindow/collectionbehavior-swift.struct/canjoinallapplications)。
+消息来源是被选中会话的本地记录：`event_msg.item_completed.UserMessage` 和 `event_msg.task_complete.last_agent_message`。只接受这些白名单事件，不把原始模型输入、工具记录或 commentary 当用户对话。该路径覆盖其他本机项目，不需要给每个项目新增 Hooks。
 
-## 界面与默认形象
+原有项目级 `UserPromptSubmit` / `Stop` Hooks 保留作为没有记录路径时的备用来源；同一会话只使用一种来源，避免重复。它们依旧只接收固定目录 `/Users/USER/Documents/my-learn/ChimeBuddy`，未安装全局 Hooks、未更改信任状态。移动项目时应修改 `Sources/main.swift` 的备用目录过滤和 `.codex/hooks.json` 中的可执行路径。
 
-2026-11-06 更新为中性灰白/炭灰、细边框和系统字体，跟随系统浅色/深色。默认形象为参考图生成的银白龙 Q 版静态 PNG；已有自定义 GIF 优先保留。右上角关闭按钮和底部会话名称和设置入口保留。角色资源与生成提示词见 [视觉记录](docs/design/2026-11-06-visual-refresh.md)。
+日志和消息记录格式都是版本相关的兼容接口。Codex 升级后若无法确认会话，伙伴隐藏，不能退回“最近发过消息”的猜测。当前版本缺少焦点字段，因此同一进程出现多个主窗口路由时返回未知；多窗口跟随不在本次已验证范围。仅支持能通过本机 `thread/read` 返回记录路径的会话；远程会话没有验证。
 
-## 2026-11-06 消息驱动跟随验收
+窗口使用 `nonactivatingPanel`、`canJoinAllSpaces`、`fullScreenAuxiliary` 和 `canJoinAllApplications`。用户此前已确认全屏可见；本次保留这些配置，多屏和全屏组合仍需人工验收。
 
-`bash scripts/test.sh` 通过 A 发消息 → B 发消息 → A 后台回复 → B 回复 → A 再发消息的切换与上下文隔离检查，以及乱序恢复、去重和名称更新。实际窗口已显示当前用户消息对应的会话，辅助功能树确认没有会话选择器。跨两个桌面聊天的人工发送验收尚未重复执行。
+## 本地数据
 
-跟随前还会通过 `thread/read` 验证会话身份。Codex 内部的输入建议任务也可能触发 UserPromptSubmit；无法被正式会话接口读取的临时任务不会切走伙伴。新会话元数据尚未落盘时会短暂重试，期间保留原上下文。
+目录：`~/Library/Application Support/ChimeBuddy/`。
 
-## 原生角色与气泡（2026-11-06）
+- `reviews.json`：按会话独立保存最近吐槽、来源事件 ID 和时间，原子写入；旧结果不能覆盖新结果。失败不覆盖缓存。
+- `avatar.gif`：导入的 GIF，不超过 20 MB。
+- `receipts.jsonl`：页面切换、缓存恢复及请求开始/结束的诊断记录，不含对话正文或模型请求内容。
+- `events/`：原项目 Hooks 的历史事件；主消息来源可用时不读取它们。
+- `last-hook-invocation.json`：原 Hook 入口的时间和字节数，不保存被拒绝的正文。
 
-已替换大卡片为透明角色＋可收起的说话气泡。点击角色开关气泡，右上角关闭窗口，从菜单栏可恢复。默认四帧角色支持待机眨眼、思考和短暂说话表情；系统减少动态效果时静止。GIF 导入保持可用。气泡内“点评一下”使用当前会话的上下文和现有 Codex 登录；自动点评仍由设置开关控制。
+退出用菜单栏的“退出 ChimeBuddy”。停用原项目 Hooks 可在 Codex 设置中禁用这两项，或移除 `.codex/hooks.json`。这不会删除本地缓存。
 
-名称暂时缺失时保留上次有效名称。跟随规则仍为“已验证的用户消息切换”，不是页面点击切换。开源参考、素材提示词及实现边界见 [原生伙伴记录](docs/design/2026-11-06-native-companion.md)。
+## 验证与参考
 
-## 会话点评结果隔离
+最新验证见 [2026-11-06 验证记录](docs/verification/2026-11-06.md)。历史原型验收在 [2026-11-05 记录](docs/verification/2026-11-05.md)，不代表当前交互。
 
-点评结果按会话 ID 和模式独立保存到本机 `reviews.json`。后台返回结果存回发起点评的会话，不覆盖当前显示；收到某会话的切换信号时恢复它自己的点评，新消息后旧结果标记为“上次”。失败请求不会覆盖已保存结果。回归覆盖 A/B 互切、迟到结果、过期结果、模式隔离和重启恢复。
-
-用户最终要求是“点击 Codex 项目下会话即跟随页面切换”。目前没有接通这个页面切换信号；消息 Hook 跟随只是此前的临时实现，不能视作这一要求已完成。
+会话选择思路参考 [CoPets selection.rs](https://github.com/ReiSuzunami/CoPets/blob/main/src-tauri/src/observer/selection.rs) 和 [streamdeckcodex desktop-active.ts](https://github.com/twidtwid/streamdeckcodex/blob/main/src/lib/desktop-active.ts)。本项目实现为独立 Swift 适配器，没有导入它们的源文件或美术素材。它们的 IPC 控制、Tauri 界面与 CDP 桥接没有引入。
