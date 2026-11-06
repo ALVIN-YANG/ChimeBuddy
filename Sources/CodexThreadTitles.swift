@@ -3,6 +3,7 @@ import Foundation
 struct CodexThreadTitle {
     let id: String
     let name: String?
+    let path: String?
 }
 
 /// Reads metadata through the public protocol. Does not resume a conversation,
@@ -61,7 +62,8 @@ enum CodexThreadTitles {
             let result = try response(requestID)
             // Missing ephemeral/deleted threads do not erase previously read names.
             if let value = result["result"] as? [String: Any], let thread = value["thread"] as? [String: Any] {
-                titles.append(CodexThreadTitle(id: threadID, name: thread["name"] as? String))
+                guard thread["id"] as? String == threadID, thread["ephemeral"] as? Bool != true else { continue }
+                titles.append(CodexThreadTitle(id: threadID, name: thread["name"] as? String, path: thread["path"] as? String))
             }
         }
         return titles

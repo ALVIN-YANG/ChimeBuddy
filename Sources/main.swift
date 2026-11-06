@@ -30,7 +30,7 @@ if CommandLine.arguments.contains("--hook") {
             print("{}")
             exit(0)
         }
-        let message = (object["prompt"] as? String) ?? (object["last_assistant_message"] as? String) ?? "（事件没有消息正文）"
+        let message = (object["prompt"] as? String) ?? (object["last_assistant_message"] as? String) ?? ""
         let event = HookEvent(id: UUID().uuidString, receivedAt: Date(), kind: kind,
                               session: object["session_id"] as? String ?? "unknown",
                               turn: object["turn_id"] as? String ?? "unknown",
@@ -56,39 +56,40 @@ final class BuddyPanel: NSPanel {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var panel: BuddyPanel!
     var statusItem: NSStatusItem!
-    var titleLabel: NSTextField!
     var messageLabel: NSTextField!
-    var source: DispatchSourceFileSystemObject?
-    var seen = Set<String>()
-    var fd: Int32 = -1
-    var hiddenByUser = false
-    var avatar: CompanionAvatarView!
-    var speechViews: [NSView] = []
-    var visualPreview: Bool { CommandLine.arguments.contains("--preview-light") || CommandLine.arguments.contains("--preview-dark") }
-    var buddySurface: BuddySurface!
-    var connectionLabel: NSTextField!
-    var pauseItem: NSMenuItem!
-    var paused = UserDefaults.standard.bool(forKey: "displayPaused")
-    let sessions = SessionStore()
-    let savedReviews = SessionReviews(directory: storage)
-    var lastEvent: HookEvent? { sessions.latest }
     var sessionLabel: NSTextField!
-    var mode = ReviewMode(rawValue: UserDefaults.standard.string(forKey: "reviewMode") ?? "expert") ?? .expert
-    var modeItems: [NSMenuItem] = []
-    var autoReview = UserDefaults.standard.bool(forKey: "autoReview")
-    var autoItem: NSMenuItem!
-    var reviewing = false
-    var pendingReviewEventID: String?
-    var reviewGeneration = UUID()
-    var refreshingTitles = false
-    var titleSessionIDs: [String] = []
+    var closeButton: NSButton!
+    var avatar: CompanionAvatarView!
+    var buddySurface: BuddySurface!
+    var pauseItem: NSMenuItem!
+    var hiddenByUser = false
+    var collapsedByUser = false
+    let state = RoastState(cache: SessionReviews(directory: storage))
+    let selectionReader = DesktopSelectionReader()
+    let launchedAt = Date()
+    let observationQueue = DispatchQueue(label: "ChimeBuddy.observation", qos: .utility)
+    let reviews: OperationQueue = {
+        let queue = OperationQueue()
+        queue.maxConcurrentOperationCount = 2
+        queue.qualityOfService = .userInitiated
+        return queue
+    }()
+    var timer: Timer?
+    var observationBusy = false
     var workspaceObservers: [NSObjectProtocol] = []
-    var liveEventIDs = Set<String>()
-    var titleRetryCounts: [String: Int] = [:]
-    var titleRetry: DispatchWorkItem?
+    var lastPage: DesktopPage?
+    var candidateID: String?
+    var selectionGeneration = UUID()
+    var metadata: [String: CodexThreadTitle] = [:]
+    var metadataRetryAt = Date.distantPast
+    var transcript: SessionTranscript?
+    var liveSince = Date()
+    var seenHooks = Set<String>()
+    var visualPreview: Bool { CommandLine.arguments.contains("--preview-light") || CommandLine.arguments.contains("--preview-dark") }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        state.paused = UserDefaults.standard.bool(forKey: "roastPaused")
         panel = BuddyPanel(contentRect: NSRect(x: 0, y: 0, width: 440, height: 282),
                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.title = "ChimeBuddy"
@@ -100,349 +101,268 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.backgroundColor = .clear
         panel.isMovableByWindowBackground = true
         panel.hasShadow = true
-
-        let view = BuddySurface(frame: panel.contentView!.bounds)
-        buddySurface = view
-        view.pointerPassthroughEnabled = !visualPreview
+        buddySurface = BuddySurface(frame: panel.contentView!.bounds)
+        buddySurface.pointerPassthroughEnabled = !visualPreview
         avatar = CompanionAvatarView(frame: BuddySurface.pet)
         avatar.imageScaling = .scaleProportionallyUpOrDown
         avatar.animates = true
-        avatar.setAccessibilityLabel("Codex 伙伴，点击收起或展开气泡")
+        avatar.setAccessibilityLabel("Codex 伙伴，点击收起或展开吐槽")
         avatar.setAccessibilityRole(.button)
         avatar.onClick = { [weak self] in self?.toggleSpeech() }
-        titleLabel = NSTextField(labelWithString: "等待 Codex 消息")
-        titleLabel.font = .systemFont(ofSize: 14, weight: .semibold)
-        titleLabel.textColor = .labelColor
-        titleLabel.frame = NSRect(x: 24, y: 222, width: 255, height: 22)
-        let closeButton = NSButton(title: "", target: self, action: #selector(hidePanel))
-        closeButton.frame = NSRect(x: 280, y: 248, width: 22, height: 22)
-        closeButton.isBordered = false
-        closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "关闭气泡")
-        closeButton.contentTintColor = .secondaryLabelColor
-        closeButton.toolTip = "隐藏气泡，可从菜单栏重新打开"
-        closeButton.setAccessibilityLabel("关闭气泡")
-        view.addSubview(closeButton)
-        connectionLabel = NSTextField(labelWithString: "尚未收到真实事件")
-        connectionLabel.font = .systemFont(ofSize: 11)
-        connectionLabel.textColor = .secondaryLabelColor
-        connectionLabel.frame = NSRect(x: 24, y: 162, width: 270, height: 17)
-        messageLabel = NSTextField(wrappingLabelWithString: "在这里查看建议与吐槽。\n在哪个会话发送消息，我就跟到哪里。")
-        messageLabel.font = .systemFont(ofSize: 13)
-        messageLabel.textColor = .labelColor
-        messageLabel.frame = NSRect(x: 24, y: 107, width: 270, height: 108)
-        view.addSubview(avatar)
-        connectionLabel.isHidden = true
-        view.addSubview(connectionLabel)
-        view.addSubview(titleLabel)
-        view.addSubview(messageLabel)
-        sessionLabel = NSTextField(labelWithString: "等待你发送消息")
-        sessionLabel.frame = NSRect(x: 24, y: 251, width: 248, height: 17)
+        buddySurface.addSubview(avatar)
+        sessionLabel = NSTextField(labelWithString: "")
         sessionLabel.font = .systemFont(ofSize: 11)
         sessionLabel.textColor = .secondaryLabelColor
         sessionLabel.lineBreakMode = .byTruncatingTail
-        view.addSubview(sessionLabel)
-        let settings = NSButton(title: "", target: self, action: #selector(showSettings))
-        settings.frame = NSRect(x: 271, y: 73, width: 28, height: 26)
-        settings.image = NSImage(systemSymbolName: "slider.horizontal.3", accessibilityDescription: "设置")
-        settings.isBordered = false
-        settings.contentTintColor = .secondaryLabelColor
-        settings.toolTip = "模式与设置"
-        settings.setAccessibilityLabel("设置")
-        view.addSubview(settings)
-        let review = NSButton(title: "点评一下", target: self, action: #selector(reviewLatest))
-        review.frame = NSRect(x: 22, y: 74, width: 82, height: 26)
-        review.bezelStyle = .rounded
-        view.addSubview(review)
-        speechViews = [titleLabel, messageLabel, sessionLabel, settings, review, closeButton]
-        panel.contentView = view
+        buddySurface.addSubview(sessionLabel)
+        messageLabel = NSTextField(wrappingLabelWithString: "")
+        messageLabel.font = .systemFont(ofSize: 14)
+        messageLabel.textColor = .labelColor
+        buddySurface.addSubview(messageLabel)
+        closeButton = NSButton(title: "", target: self, action: #selector(hidePanel))
+        closeButton.isBordered = false
+        closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "隐藏伙伴")
+        closeButton.contentTintColor = .secondaryLabelColor
+        closeButton.setAccessibilityLabel("隐藏伙伴")
+        closeButton.toolTip = "隐藏伙伴，可从菜单栏恢复"
+        buddySurface.addSubview(closeButton)
+        panel.contentView = buddySurface
         loadAvatar()
         if let screen = NSScreen.main {
             panel.setFrameOrigin(NSPoint(x: screen.visibleFrame.maxX - 465, y: screen.visibleFrame.minY + 70))
         }
-        presentPanel()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.image = NSImage(systemSymbolName: "bubble.left.and.text.bubble.right", accessibilityDescription: "ChimeBuddy")
-        statusItem.button?.toolTip = "ChimeBuddy · Codex 伙伴"
+        statusItem.button?.toolTip = "ChimeBuddy · 当前会话吐槽"
         let menu = NSMenu()
-        menu.addItem(withTitle: "显示气泡", action: #selector(showPanel), keyEquivalent: "")
-        menu.addItem(withTitle: "隐藏气泡", action: #selector(hidePanel), keyEquivalent: "")
-        pauseItem = menu.addItem(withTitle: "暂停消息显示", action: #selector(togglePause), keyEquivalent: "")
-        pauseItem.state = paused ? .on : .off
+        menu.addItem(withTitle: "显示伙伴", action: #selector(showPanel), keyEquivalent: "")
+        menu.addItem(withTitle: "隐藏伙伴", action: #selector(hidePanel), keyEquivalent: "")
+        pauseItem = menu.addItem(withTitle: "暂停自动吐槽", action: #selector(togglePause), keyEquivalent: "")
+        pauseItem.state = state.paused ? .on : .off
         menu.addItem(NSMenuItem.separator())
         menu.addItem(withTitle: "导入 GIF 形象…", action: #selector(importAvatar), keyEquivalent: "")
         menu.addItem(withTitle: "恢复默认 Codex 伙伴", action: #selector(resetAvatar), keyEquivalent: "")
         menu.addItem(NSMenuItem.separator())
-        for option in ReviewMode.allCases {
-            let item = menu.addItem(withTitle: option.title + "模式", action: #selector(selectMode(_:)), keyEquivalent: "")
-            item.representedObject = option.rawValue
-            item.state = option == mode ? .on : .off
-            modeItems.append(item)
-        }
-        menu.addItem(withTitle: "点评最新回合（使用 Codex 用量）", action: #selector(reviewLatest), keyEquivalent: "")
-        autoItem = menu.addItem(withTitle: "回合结束后自动点评", action: #selector(toggleAutoReview), keyEquivalent: "")
-        autoItem.state = autoReview ? .on : .off
-        menu.addItem(NSMenuItem.separator())
         menu.addItem(withTitle: "退出 ChimeBuddy", action: #selector(quit), keyEquivalent: "q")
         for item in menu.items { item.target = self }
         statusItem.menu = menu
-
-        // Ignore previous launches' events, then use filesystem notifications
-        // rather than repeatedly polling conversation files.
-        for url in (try? FileManager.default.contentsOfDirectory(at: inbox, includingPropertiesForKeys: nil)) ?? [] {
-            seen.insert(url.lastPathComponent)
-            if let data = try? Data(contentsOf: url), let event = try? JSONDecoder().decode(HookEvent.self, from: data) {
-                sessions.receive(event)
-            }
+        render()
+        if visualPreview {
+            panel.appearance = NSAppearance(named: CommandLine.arguments.contains("--preview-light") ? .aqua : .darkAqua)
+            sessionLabel.stringValue = "调研 Codex 对话助手可行性"
+            messageLabel.stringValue = "说好养只桌宠，结果先给她安排了会话隔离和缓存管理。"
+            setSpeechVisible(true)
+            avatar.setMood(.speaking)
+            presentPanel()
+            return
         }
-        refreshSessions()
-
-        refreshStatus()
-        if let event = lastEvent {
-            titleLabel.stringValue = "已跟随最近发消息的会话"
-            messageLabel.stringValue = String(event.text.prefix(130))
-        }
-        fd = open(inbox.path, O_EVTONLY)
-        guard fd >= 0 else { messageLabel.stringValue = "无法监听事件目录"; return }
-        source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: .write, queue: .main)
-        source?.setEventHandler { [weak self] in self?.receive() }
-        source?.resume()
-        writeReceipt(["state": "ready", "pid": ProcessInfo.processInfo.processIdentifier])
-        let workspaceCenter = NSWorkspace.shared.notificationCenter
+        let center = NSWorkspace.shared.notificationCenter
         for name in [NSWorkspace.didActivateApplicationNotification, NSWorkspace.activeSpaceDidChangeNotification, NSWorkspace.didHideApplicationNotification] {
-            workspaceObservers.append(workspaceCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                self?.presentPanel()
+            workspaceObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                self?.presentPanel(); self?.poll()
             })
         }
-        presentPanel()
-        // Explicit local visual fixture; no model request or conversation write.
-        if CommandLine.arguments.contains("--preview-light") || CommandLine.arguments.contains("--preview-dark") {
-            panel.appearance = NSAppearance(named: CommandLine.arguments.contains("--preview-light") ? .aqua : .darkAqua)
-            titleLabel.stringValue = "双开点评 · 样式预览"
-            connectionLabel.stringValue = "示例内容 · 不调用模型"
-            avatar.setMood(.speaking)
-            messageLabel.stringValue = "专家：先确认需求和验收条件，再做最小改动。不要把测试通过当作完整交付。\n吐槽：只想加个按钮，差点收到一座软件产业园。"
-            presentPanel()
-        }
+        let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in self?.poll() }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+        writeReceipt(["state": "ready", "pid": ProcessInfo.processInfo.processIdentifier])
+        poll()
     }
 
-    func receive() {
-        let urls = (try? FileManager.default.contentsOfDirectory(at: inbox, includingPropertiesForKeys: nil)) ?? []
-        let events = urls.filter { $0.pathExtension == "json" && !seen.contains($0.lastPathComponent) }
-            .compactMap { url -> HookEvent? in
-                guard let data = try? Data(contentsOf: url), let event = try? JSONDecoder().decode(HookEvent.self, from: data) else { return nil }
-                seen.insert(url.lastPathComponent)
-                return event
-            }.sorted { $0.receivedAt < $1.receivedAt }
-        for event in events {
-            liveEventIDs.insert(event.id)
-            let previousSessionID = sessions.selectedID
-            let affectsSelection = sessions.receive(event)
-            refreshSessions()
-            if event.kind == "UserPromptSubmit" && affectsSelection { refreshTitles() }
-            guard affectsSelection else {
-                writeReceipt(["state": "receivedInBackground", "eventID": event.id, "simulated": event.simulated])
-                continue
-            }
-            displayFollowedEvent(event, switched: previousSessionID != sessions.selectedID)
-        }
-    }
-
-    func displayFollowedEvent(_ event: HookEvent, switched: Bool, identityResolved: Bool = false) {
-        reviewGeneration = UUID()
-        pendingReviewEventID = nil
-        refreshStatus()
-        if paused {
-            if switched {
-                titleLabel.stringValue = "已跟随新的会话"
-                messageLabel.stringValue = "消息显示已暂停，恢复后可点评此会话。"
-            }
-            writeReceipt(["state": "receivedWhilePaused", "eventID": event.id, "simulated": event.simulated])
-            return
-        }
-        avatar.setMood(event.kind == "Stop" ? .idle : .thinking)
-        titleLabel.stringValue = event.kind == "Stop" ? "要听听我的看法吗？" : "我在听"
-        messageLabel.stringValue = event.kind == "Stop" ? "回复已结束。可以听专家建议，也可以来一句吐槽。" : "这条对话我跟上了。等回复结束，我再给你第二意见。"
-        restoreReview()
-        presentPanel()
-        panel.displayIfNeeded()
-        writeReceipt(["state": identityResolved ? "identityResolved" : "displayed", "eventID": event.id,
-                      "kind": event.kind, "session": event.session, "simulated": event.simulated])
-        if event.kind == "Stop" && autoReview && liveEventIDs.contains(event.id) { reviewLatest() }
-    }
-
-    func refreshSessions() {
-        if let id = sessions.selectedID {
-            sessionLabel.stringValue = sessions.title(for: id)
-            sessionLabel.toolTip = sessionLabel.stringValue + "\n" + id
-        } else {
-            sessionLabel.stringValue = "等待你发送消息"
-            sessionLabel.toolTip = "仅用户发送消息时自动切换，不跟随后台回复"
-        }
-        if titleSessionIDs != sessions.sessions { refreshTitles() }
-    }
-
-    func refreshTitles() {
-        guard !refreshingTitles else { return }
-        refreshingTitles = true
-        let ids = sessions.sessions
-        titleSessionIDs = ids
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            let result = Result { try CodexThreadTitles.fetch(ids: ids) }
+    func poll() {
+        guard !visualPreview, !observationBusy else { return }
+        observationBusy = true
+        let applications = NSRunningApplication.runningApplications(withBundleIdentifier: "com.openai.codex")
+        let codex = applications.count == 1 ? applications.first : nil
+        let processID = codex?.processIdentifier
+        let processStartedAt = codex?.launchDate
+        observationQueue.async { [weak self] in
+            guard let self = self else { return }
+            let page = self.selectionReader.read(processID: processID, processStartedAt: processStartedAt)
             DispatchQueue.main.async {
-                guard let self = self else { return }
-                self.refreshingTitles = false
-                if case .success(let titles) = result {
-                    let previousSessionID = self.sessions.selectedID
-                    let previousEventID = self.lastEvent?.id
-                    for title in titles {
-                        self.sessions.updateTitle(title.name, for: title.id)
-                        self.sessions.confirmSession(title.id)
-                    }
-                    self.refreshSessions()
-                    if previousEventID != self.lastEvent?.id, !self.visualPreview, let event = self.lastEvent {
-                        self.displayFollowedEvent(event, switched: previousSessionID != self.sessions.selectedID, identityResolved: true)
-                    }
-                    let resolved = Set(titles.filter { $0.name?.isEmpty == false }.map { $0.id })
-                    let pending = ids.filter { !resolved.contains($0) && (self.titleRetryCounts[$0] ?? 0) < 3 }
-                    if !pending.isEmpty {
-                        for id in pending { self.titleRetryCounts[id, default: 0] += 1 }
-                        self.titleRetry?.cancel()
-                        let retry = DispatchWorkItem { [weak self] in self?.refreshTitles() }
-                        self.titleRetry = retry
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 5, execute: retry)
+                self.observationBusy = false
+                self.follow(page)
+                self.readMessages()
+            }
+        }
+    }
+
+    func follow(_ page: DesktopPage?) {
+        let changed = lastPage?.sessionID != page?.sessionID || lastPage?.windowID != page?.windowID || (lastPage == nil) != (page == nil)
+        lastPage = page
+        if changed {
+            candidateID = page?.sessionID
+            liveSince = max(launchedAt, page?.timestamp ?? Date())
+            selectionGeneration = UUID()
+            transcript = nil
+            state.sessions.select(nil)
+            reviews.cancelAllOperations() // Running calls may finish into their own cache.
+            render()
+            writeReceipt(["state": "pageChanged", "candidateSession": candidateID ?? ""])
+            metadataRetryAt = .distantPast
+            if let id = candidateID, let known = metadata[id] { activate(known) }
+        }
+        guard let id = candidateID, Date() >= metadataRetryAt else { return }
+        metadataRetryAt = Date().addingTimeInterval(5)
+        let generation = selectionGeneration
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let result = Result { try CodexThreadTitles.fetch(ids: [id]) }
+            DispatchQueue.main.async {
+                guard let self = self, self.selectionGeneration == generation, self.candidateID == id else { return }
+                if case .success(let values) = result, let value = values.first {
+                    self.metadata[id] = value
+                    self.metadataRetryAt = Date().addingTimeInterval(30)
+                    if self.state.sessions.selectedID == id {
+                        self.state.sessions.updateTitle(value.name, for: id)
+                        self.sessionLabel.stringValue = self.state.sessions.title(for: id)
+                    } else {
+                        self.activate(value)
+                        self.readMessages()
                     }
                 } else {
-                    self.sessionLabel.toolTip = "会话名刷新失败，下次消息时重试"
-                    self.titleSessionIDs = []
+                    self.writeReceipt(["state": "pageIdentityUnavailable", "candidateSession": id])
                 }
-                if ids != self.sessions.sessions { self.refreshTitles() }
             }
         }
     }
 
-    @objc func showSettings() {
-        statusItem.menu?.popUp(positioning: nil, at: NSPoint(x: 275, y: 103), in: panel.contentView)
-    }
-
-    @objc func selectMode(_ sender: NSMenuItem) {
-        guard let value = sender.representedObject as? String, let selected = ReviewMode(rawValue: value) else { return }
-        mode = selected
-        reviewGeneration = UUID()
-        UserDefaults.standard.set(mode.rawValue, forKey: "reviewMode")
-        for item in modeItems { item.state = (item.representedObject as? String) == mode.rawValue ? .on : .off }
-        if !restoreReview() {
-            titleLabel.stringValue = mode.title + "模式"
-            messageLabel.stringValue = "这个会话还没有该模式的点评。"
+    func activate(_ value: CodexThreadTitle) {
+        guard candidateID == value.id else { return }
+        state.sessions.updateTitle(value.name, for: value.id)
+        state.sessions.select(value.id)
+        if let path = value.path {
+            transcript = SessionTranscript(sessionID: value.id, url: URL(fileURLWithPath: path))
         }
-        presentPanel()
+        render()
+        writeReceipt(["state": "sessionSelected", "contextSession": value.id, "cacheRestored": state.text != nil])
     }
 
-    @discardableResult func restoreReview() -> Bool {
-        guard let id = sessions.selectedID, let saved = savedReviews.review(sessionID: id, mode: mode.rawValue) else { return false }
-        let stale = saved.eventID != lastEvent?.id
-        titleLabel.stringValue = (stale ? "上次" : "") + mode.title + "点评"
-        messageLabel.stringValue = saved.text
-        avatar.setMood(.idle)
-        writeReceipt(["state": "reviewRestored", "contextSession": id, "stale": stale])
-        return true
-    }
-
-    @objc func toggleAutoReview() {
-        autoReview.toggle()
-        autoItem.state = autoReview ? .on : .off
-        UserDefaults.standard.set(autoReview, forKey: "autoReview")
-    }
-
-    @objc func reviewLatest() {
-        guard !paused else { return }
-        guard !reviewing else {
-            pendingReviewEventID = lastEvent?.id
-            titleLabel.stringValue = "等待当前会话点评"
-            messageLabel.stringValue = "上一条点评结束后，会使用当前会话的上下文。"
+    func readMessages() {
+        guard let id = state.sessions.selectedID else { return }
+        // Transcript first: it preserves typed user items, excludes tool output,
+        // and covers every local project without installing additional Hooks.
+        if let transcript = transcript {
+            for event in transcript.read().sorted(by: { $0.receivedAt < $1.receivedAt }) {
+                consume(event, live: event.receivedAt >= liveSince)
+            }
             return
         }
-        guard lastEvent != nil else {
-            titleLabel.stringValue = "还没有可点评的真实消息"
-            messageLabel.stringValue = "先确认 Codex Hooks 接通。模拟事件不会发送给模型。"
-            presentPanel()
-            return
+        // Use exactly one message source. A Hook has no transcript item ID,
+        // so merging both would duplicate a user message or lose steering.
+        let urls = (try? FileManager.default.contentsOfDirectory(at: inbox, includingPropertiesForKeys: nil)) ?? []
+        let events = urls.filter { $0.pathExtension == "json" && !seenHooks.contains($0.lastPathComponent) }.compactMap { url -> HookEvent? in
+            guard let data = try? Data(contentsOf: url), let value = try? JSONDecoder().decode(HookEvent.self, from: data) else { return nil }
+            seenHooks.insert(url.lastPathComponent)
+            return value
+        }.sorted { $0.receivedAt < $1.receivedAt }
+        for event in events where event.session == id {
+            consume(event, live: event.receivedAt >= liveSince)
         }
-        let history = sessions.history.suffix(6)
-        let contextSessionID = sessions.selectedID
-        let contextEventID = lastEvent?.id
-        let contextEventDate = lastEvent!.receivedAt
-        let excerpts = history.map { ["role": $0.kind == "Stop" ? "assistant" : "user", "excerpt": $0.text] }
-        guard let json = try? JSONSerialization.data(withJSONObject: excerpts), let context = String(data: json, encoding: .utf8) else { return }
-        reviewing = true
-        writeReceipt(["state": "reviewStarted", "contextSession": contextSessionID ?? "", "contextEvent": contextEventID ?? ""])
-        let generation = UUID()
-        reviewGeneration = generation
-        let selected = mode
+    }
+
+    func consume(_ event: HookEvent, live: Bool) {
+        guard let request = state.receive(event, live: live) else { return }
+        schedule(request)
+    }
+
+    func schedule(_ request: RoastRequest) {
         avatar.setMood(.thinking)
-        titleLabel.stringValue = selected.title + "正在点评…"
-        messageLabel.stringValue = "让我想一想，马上给你第二意见。"
-        presentPanel()
-        let options: [ReviewMode] = selected == .both ? [.expert, .roast] : [selected]
-        let group = DispatchGroup()
-        let lock = NSLock()
-        var answers: [String: String] = [:]
-        var succeeded = Set<String>()
-        for option in options {
-            group.enter()
-            DispatchQueue.global(qos: .userInitiated).async {
-                let result: String
-                var success = false
-                do { result = try CodexReviewer.review(context: context, mode: option); success = true }
-                catch { result = error.localizedDescription }
-                lock.lock()
-                answers[option.rawValue] = result
-                if success { succeeded.insert(option.rawValue) }
-                lock.unlock()
-                group.leave()
-            }
-        }
-        group.notify(queue: .main) { [weak self] in
+        writeReceipt(["state": "roastQueued", "contextSession": request.event.session, "eventKey": request.key, "kind": request.event.kind])
+        reviews.addOperation { [weak self] in
             guard let self = self else { return }
-            self.reviewing = false
-            let text = options.map { $0.title + "：" + String((answers[$0.rawValue] ?? "没有返回内容").prefix(selected == .both ? 55 : 100)) }.joined(separator: "\n")
-            if succeeded.count == options.count, let id = contextSessionID, let eventID = contextEventID {
-                do {
-                    try self.savedReviews.save(SavedReview(sessionID: id, mode: selected.rawValue, eventID: eventID,
-                                                          eventDate: contextEventDate, text: text))
-                } catch {
-                    self.writeReceipt(["state": "reviewSaveFailed", "contextSession": id])
-                }
+            let current = DispatchQueue.main.sync { self.state.canStart(request) }
+            guard current else { return }
+            DispatchQueue.main.async {
+                self.writeReceipt(["state": "roastStarted", "contextSession": request.event.session, "eventKey": request.key, "kind": request.event.kind])
             }
-            self.writeReceipt(["state": "reviewCompleted", "contextSession": contextSessionID ?? "",
-                               "responseLengths": answers.mapValues { $0.count }, "discarded": self.reviewGeneration != generation])
-            if let pending = self.pendingReviewEventID {
-                self.pendingReviewEventID = nil
-                if pending == self.lastEvent?.id && !self.paused {
-                    self.reviewLatest()
-                    return
+            let result = Result { try CodexReviewer.review(context: request.context) }
+            DispatchQueue.main.async {
+                var displayed = false
+                switch result {
+                case .success(let answer):
+                    do {
+                        try self.state.complete(request, text: answer)
+                        if self.state.canPresent(request) {
+                            self.render()
+                            self.avatar.setMood(.speaking)
+                            displayed = true
+                        }
+                    } catch { self.writeReceipt(["state": "roastCacheFailed", "contextSession": request.event.session]) }
+                case .failure(let error):
+                    // Errors and connection status belong in diagnostics, never
+                    // in the character's speech bubble. Keep the previous roast.
+                    self.writeReceipt(["state": "roastFailed", "contextSession": request.event.session, "reason": error.localizedDescription])
+                    if self.state.sessions.selectedID == request.event.session { self.render() }
                 }
+                self.writeReceipt(["state": "roastCompleted", "contextSession": request.event.session,
+                                   "eventKey": request.key, "kind": request.event.kind, "displayed": displayed])
             }
-            guard self.reviewGeneration == generation && !self.paused,
-                  self.sessions.selectedID == contextSessionID,
-                  self.lastEvent?.id == contextEventID else { return }
-            self.avatar.setMood(.speaking)
-            self.titleLabel.stringValue = selected.title + "点评"
-            self.messageLabel.stringValue = text
-            self.presentPanel()
         }
     }
 
-    func refreshStatus() {
-        if paused {
-            connectionLabel.stringValue = "已暂停显示 · 仍在本地接收事件"
-        } else if let event = lastEvent {
-            let time = DateFormatter.localizedString(from: event.receivedAt, dateStyle: .none, timeStyle: .short)
-            connectionLabel.stringValue = "跟随发送 · 最近事件 \(time)"
-        } else {
-            connectionLabel.stringValue = "尚未收到真实事件"
-        }
+    func render() {
+        if let id = state.sessions.selectedID {
+            sessionLabel.stringValue = state.sessions.title(for: id)
+            sessionLabel.toolTip = sessionLabel.stringValue
+        } else { sessionLabel.stringValue = "" }
+        messageLabel.stringValue = state.text ?? ""
+        setSpeechVisible(!collapsedByUser && !(state.text ?? "").isEmpty)
+        avatar.setMood(.idle)
+        presentPanel()
     }
 
+    func setSpeechVisible(_ visible: Bool) {
+        buddySurface.showsSpeech = visible
+        for view in [messageLabel!, sessionLabel!, closeButton!] { view.isHidden = !visible }
+    }
+
+    func layoutSpeech() {
+        let measured = (messageLabel.stringValue as NSString).boundingRect(
+            with: NSSize(width: 266, height: 160), options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: messageLabel.font!]).height
+        let height = min(134, max(24, ceil(measured) + 4))
+        let bottom = 274 - (height + 60)
+        buddySurface.bubbleRect = NSRect(x: 8, y: bottom, width: 304, height: height + 60)
+        messageLabel.frame = NSRect(x: 24, y: bottom + 16, width: 270, height: height)
+        sessionLabel.frame = NSRect(x: 24, y: 246, width: 248, height: 17)
+        closeButton.frame = NSRect(x: 280, y: 244, width: 22, height: 22)
+        buddySurface.needsDisplay = true
+    }
+
+    func toggleSpeech() {
+        collapsedByUser.toggle()
+        setSpeechVisible(!collapsedByUser && !messageLabel.stringValue.isEmpty)
+        writeReceipt(["state": collapsedByUser ? "speechCollapsed" : "speechExpanded"])
+    }
+    @objc func togglePause() {
+        state.paused.toggle()
+        UserDefaults.standard.set(state.paused, forKey: "roastPaused")
+        pauseItem.state = state.paused ? .on : .off
+        if state.paused { reviews.cancelAllOperations() }
+        render()
+    }
+    @objc func hidePanel() { hiddenByUser = true; panel.orderOut(nil) }
+    @objc func showPanel() { hiddenByUser = false; presentPanel() }
+    func presentPanel() {
+        layoutSpeech()
+        let codexIsFrontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.openai.codex"
+        if !hiddenByUser && ((codexIsFrontmost && state.sessions.selectedID != nil) || visualPreview) { panel.orderFrontRegardless() }
+        else { panel.orderOut(nil) }
+    }
+    func writeReceipt(_ values: [String: Any]) {
+        var record = values
+        record["timestamp"] = ISO8601DateFormatter().string(from: Date())
+        record["followedSession"] = state.sessions.selectedID
+        if let data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]) {
+            let url = storage.appendingPathComponent("receipts.jsonl")
+            if !FileManager.default.fileExists(atPath: url.path) { FileManager.default.createFile(atPath: url.path, contents: nil, attributes: [.posixPermissions: 0o600]) }
+            if let handle = try? FileHandle(forWritingTo: url) {
+                defer { try? handle.close() }
+                _ = try? handle.seekToEnd()
+                try? handle.write(contentsOf: data + Data([10]))
+            }
+        }
+    }
     func loadAvatar() {
         let custom = storage.appendingPathComponent("avatar.gif")
         if let image = NSImage(contentsOf: custom) {
@@ -494,60 +414,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc func togglePause() {
-        paused.toggle()
-        reviewGeneration = UUID()
-        UserDefaults.standard.set(paused, forKey: "displayPaused")
-        pauseItem.state = paused ? .on : .off
-        refreshStatus()
-    }
-    func layoutSpeech() {
-        guard messageLabel != nil, speechViews.count == 6 else { return }
-        let measured = (messageLabel.stringValue as NSString).boundingRect(
-            with: NSSize(width: 266, height: 150), options: [.usesLineFragmentOrigin, .usesFontLeading],
-            attributes: [.font: messageLabel.font!]).height
-        let height = min(114, max(38, ceil(measured) + 6))
-        let bottom = 274 - (height + 115)
-        buddySurface.bubbleRect = NSRect(x: 8, y: bottom, width: 304, height: height + 115)
-        messageLabel.frame = NSRect(x: 24, y: bottom + 50, width: 270, height: height)
-        speechViews[3].setFrameOrigin(NSPoint(x: 271, y: bottom + 9))
-        speechViews[4].setFrameOrigin(NSPoint(x: 22, y: bottom + 10))
-        buddySurface.needsDisplay = true
-    }
-
-    func toggleSpeech() {
-        buddySurface.showsSpeech.toggle()
-        for view in speechViews { view.isHidden = !buddySurface.showsSpeech }
-        writeReceipt(["state": buddySurface.showsSpeech ? "speechExpanded" : "speechCollapsed"])
-    }
-    @objc func hidePanel() { hiddenByUser = true; panel.orderOut(nil) }
-
-    func writeReceipt(_ values: [String: Any]) {
-        var record = values
-        record["timestamp"] = ISO8601DateFormatter().string(from: Date())
-        record["windowNumber"] = panel.windowNumber
-        record["windowVisible"] = panel.isVisible
-        record["followedSession"] = sessions.selectedID
-        if let data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]) {
-            let url = storage.appendingPathComponent("receipts.jsonl")
-            if !FileManager.default.fileExists(atPath: url.path) { FileManager.default.createFile(atPath: url.path, contents: nil, attributes: [.posixPermissions: 0o600]) }
-            if let handle = try? FileHandle(forWritingTo: url) {
-                defer { try? handle.close() }
-                _ = try? handle.seekToEnd()
-                try? handle.write(contentsOf: data + Data([10]))
-            }
-        }
-    }
-    func presentPanel() {
-        let codexIsFrontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.openai.codex"
-        layoutSpeech()
-        if !hiddenByUser && (codexIsFrontmost || visualPreview) {
-            panel.orderFrontRegardless()
-        } else {
-            panel.orderOut(nil)
-        }
-    }
-    @objc func showPanel() { hiddenByUser = false; presentPanel() }
     @objc func quit() { NSApp.terminate(nil) }
 }
 
