@@ -4,6 +4,7 @@ cd "$(dirname "$0")/.."
 app=".build/ChimeBuddy.app"
 mkdir -p "$app/Contents/MacOS"
 mkdir -p "$app/Contents/Resources"
+cp Assets/codex-companion-atlas.png "$app/Contents/Resources/codex-companion-atlas.png"
 cp Assets/codex-companion.png "$app/Contents/Resources/codex-companion.png"
 swiftc -swift-version 5 Sources/*.swift -o "$app/Contents/MacOS/ChimeBuddy" -framework AppKit
 cat > "$app/Contents/Info.plist" <<'PLIST'
