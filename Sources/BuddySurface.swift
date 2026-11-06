@@ -2,7 +2,7 @@ import AppKit
 
 /// A compact speech bubble beside an independent transparent character.
 final class BuddySurface: NSView {
-    static let bubble = NSRect(x: 8, y: 64, width: 304, height: 210)
+    static let bubble = NSRect(x: 74, y: 109, width: 262, height: 58)
     var bubbleRect = BuddySurface.bubble
     var pointerPassthroughEnabled = true
     static let pet = NSRect(x: 316, y: 12, width: 116, height: 158)
@@ -25,11 +25,12 @@ final class BuddySurface: NSView {
     override func draw(_ dirtyRect: NSRect) {
         guard showsSpeech else { return }
         let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        let shape = NSBezierPath(roundedRect: bubbleRect, xRadius: 16, yRadius: 16)
+        let shape = NSBezierPath(roundedRect: bubbleRect, xRadius: 12, yRadius: 12)
+        let tailY = bubbleRect.minY + min(22, bubbleRect.height / 2)
         let tail = NSBezierPath()
-        tail.move(to: NSPoint(x: 311, y: bubbleRect.minY + 41))
-        tail.line(to: NSPoint(x: 325, y: bubbleRect.minY + 29))
-        tail.line(to: NSPoint(x: 311, y: bubbleRect.minY + 27))
+        tail.move(to: NSPoint(x: bubbleRect.maxX - 1, y: tailY + 6))
+        tail.line(to: NSPoint(x: bubbleRect.maxX + 14, y: tailY - 6))
+        tail.line(to: NSPoint(x: bubbleRect.maxX - 1, y: tailY - 6))
         tail.close()
         let background = NSColor(calibratedWhite: dark ? 0.13 : 0.985, alpha: 1)
         background.setFill(); shape.fill(); tail.fill()

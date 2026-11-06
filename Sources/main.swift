@@ -57,7 +57,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var panel: BuddyPanel!
     var statusItem: NSStatusItem!
     var messageLabel: NSTextField!
-    var sessionLabel: NSTextField!
     var closeButton: NSButton!
     var avatar: CompanionAvatarView!
     var buddySurface: BuddySurface!
@@ -110,18 +109,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         avatar.setAccessibilityRole(.button)
         avatar.onClick = { [weak self] in self?.toggleSpeech() }
         buddySurface.addSubview(avatar)
-        sessionLabel = NSTextField(labelWithString: "")
-        sessionLabel.font = .systemFont(ofSize: 11)
-        sessionLabel.textColor = .secondaryLabelColor
-        sessionLabel.lineBreakMode = .byTruncatingTail
-        buddySurface.addSubview(sessionLabel)
         messageLabel = NSTextField(wrappingLabelWithString: "")
-        messageLabel.font = .systemFont(ofSize: 14)
+        messageLabel.font = .systemFont(ofSize: 13)
         messageLabel.textColor = .labelColor
         buddySurface.addSubview(messageLabel)
         closeButton = NSButton(title: "", target: self, action: #selector(hidePanel))
         closeButton.isBordered = false
         closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "隐藏伙伴")
+        closeButton.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 9, weight: .regular)
         closeButton.contentTintColor = .secondaryLabelColor
         closeButton.setAccessibilityLabel("隐藏伙伴")
         closeButton.toolTip = "隐藏伙伴，可从菜单栏恢复"
@@ -149,8 +144,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         render()
         if visualPreview {
             panel.appearance = NSAppearance(named: CommandLine.arguments.contains("--preview-light") ? .aqua : .darkAqua)
-            sessionLabel.stringValue = "调研 Codex 对话助手可行性"
             messageLabel.stringValue = "说好养只桌宠，结果先给她安排了会话隔离和缓存管理。"
+            if CommandLine.arguments.contains("--preview-long") {
+                messageLabel.stringValue = "说好只养一只安静的小桌宠，结果会话隔离、自动吐槽、缓存恢复和全屏跟随一个都不能少，她还没正式上岗，验收清单倒是先写满了一页。"
+            }
             setSpeechVisible(true)
             avatar.setMood(.speaking)
             presentPanel()
@@ -214,7 +211,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.metadataRetryAt = Date().addingTimeInterval(30)
                     if self.state.sessions.selectedID == id {
                         self.state.sessions.updateTitle(value.name, for: id)
-                        self.sessionLabel.stringValue = self.state.sessions.title(for: id)
                     } else {
                         self.activate(value)
                         self.readMessages()
@@ -301,10 +297,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func render() {
-        if let id = state.sessions.selectedID {
-            sessionLabel.stringValue = state.sessions.title(for: id)
-            sessionLabel.toolTip = sessionLabel.stringValue
-        } else { sessionLabel.stringValue = "" }
         messageLabel.stringValue = state.text ?? ""
         setSpeechVisible(!collapsedByUser && !(state.text ?? "").isEmpty)
         avatar.setMood(.idle)
@@ -313,19 +305,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func setSpeechVisible(_ visible: Bool) {
         buddySurface.showsSpeech = visible
-        for view in [messageLabel!, sessionLabel!, closeButton!] { view.isHidden = !visible }
+        for view in [messageLabel!, closeButton!] { view.isHidden = !visible }
     }
 
     func layoutSpeech() {
-        let measured = (messageLabel.stringValue as NSString).boundingRect(
-            with: NSSize(width: 266, height: 160), options: [.usesLineFragmentOrigin, .usesFontLeading],
-            attributes: [.font: messageLabel.font!]).height
-        let height = min(134, max(24, ceil(measured) + 4))
-        let bottom = 274 - (height + 60)
-        buddySurface.bubbleRect = NSRect(x: 8, y: bottom, width: 304, height: height + 60)
-        messageLabel.frame = NSRect(x: 24, y: bottom + 16, width: 270, height: height)
-        sessionLabel.frame = NSRect(x: 24, y: 246, width: 248, height: 17)
-        closeButton.frame = NSRect(x: 280, y: 244, width: 22, height: 22)
+        let attributes: [NSAttributedString.Key: Any] = [.font: messageLabel.font!]
+        let text = messageLabel.stringValue as NSString
+        let width = min(220, max(90, ceil(text.size(withAttributes: attributes).width)))
+        let measured = text.boundingRect(with: NSSize(width: width, height: 200),
+                                        options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: attributes).height
+        let height = max(18, ceil(measured) + 2)
+        let bubble = NSRect(x: BuddySurface.pet.minX + 20 - (width + 42),
+                            y: BuddySurface.pet.midY + 18, width: width + 42, height: height + 20)
+        buddySurface.bubbleRect = bubble
+        messageLabel.frame = NSRect(x: bubble.minX + 12, y: bubble.minY + 10, width: width, height: height)
+        closeButton.frame = NSRect(x: bubble.maxX - 25, y: bubble.maxY - 25, width: 22, height: 22)
         buddySurface.needsDisplay = true
     }
 
