@@ -77,6 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var reviewGeneration = UUID()
     var refreshingTitles = false
     var titleSessionIDs: [String] = []
+    var workspaceObservers: [NSObjectProtocol] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -194,6 +195,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         source?.setEventHandler { [weak self] in self?.receive() }
         source?.resume()
         writeReceipt(["state": "ready", "pid": ProcessInfo.processInfo.processIdentifier])
+        let workspaceCenter = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.didActivateApplicationNotification, NSWorkspace.activeSpaceDidChangeNotification, NSWorkspace.didHideApplicationNotification] {
+            workspaceObservers.append(workspaceCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                self?.presentPanel()
+            })
+        }
+        presentPanel()
         // Explicit local visual fixture; no model request or conversation write.
         if CommandLine.arguments.contains("--preview-light") || CommandLine.arguments.contains("--preview-dark") {
             panel.appearance = NSAppearance(named: CommandLine.arguments.contains("--preview-light") ? .aqua : .darkAqua)
@@ -443,7 +451,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
     }
-    func presentPanel() { if !hiddenByUser { panel.orderFrontRegardless() } }
+    func presentPanel() {
+        let codexIsFrontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.openai.codex"
+        if !hiddenByUser && codexIsFrontmost {
+            panel.orderFrontRegardless()
+        } else {
+            panel.orderOut(nil)
+        }
+    }
     @objc func showPanel() { hiddenByUser = false; presentPanel() }
     @objc func quit() { NSApp.terminate(nil) }
 }
