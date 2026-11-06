@@ -14,3 +14,5 @@ swiftc -swift-version 5 Sources/SessionStore.swift Sources/SessionReviews.swift 
 .build/roast-state-tests
 swiftc -swift-version 5 Sources/ModelPreferences.swift Tests/ModelPreferencesTests.swift -o .build/model-preferences-tests
 .build/model-preferences-tests
+swiftc -swift-version 5 Sources/AvatarFrameRegistration.swift Tests/AvatarFrameRegistrationTests.swift -framework AppKit -o .build/avatar-registration-tests
+.build/avatar-registration-tests

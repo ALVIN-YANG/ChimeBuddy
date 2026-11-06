@@ -48,12 +48,7 @@ final class CompanionAvatarView: NSImageView {
         custom = false
         frames.removeAll()
         if let source = CGImageSourceCreateWithURL(url as CFURL, nil), let sheet = CGImageSourceCreateImageAtIndex(source, 0, nil) {
-            let width = sheet.width / 2, height = sheet.height / 2
-            for index in 0..<4 {
-                if let crop = sheet.cropping(to: CGRect(x: (index % 2) * width, y: (index / 2) * height, width: width, height: height)) {
-                    frames.append(NSImage(cgImage: crop, size: NSSize(width: width, height: height)))
-                }
-            }
+            frames = AvatarFrameRegistration.frames(from: sheet)
         }
         displayedFrame = -1
         if timer == nil {
