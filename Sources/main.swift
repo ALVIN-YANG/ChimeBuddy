@@ -265,10 +265,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self = self else { return }
             let current = DispatchQueue.main.sync { self.state.canStart(request) }
             guard current else { return }
+            let selection = CodexModelPreferences.load()
             DispatchQueue.main.async {
-                self.writeReceipt(["state": "roastStarted", "contextSession": request.event.session, "eventKey": request.key, "kind": request.event.kind])
+                self.writeReceipt(["state": "roastStarted", "contextSession": request.event.session, "eventKey": request.key, "kind": request.event.kind,
+                                   "model": selection?.model ?? "default", "reasoningEffort": selection?.effort ?? "default"])
             }
-            let result = Result { try CodexReviewer.review(context: request.context) }
+            let result = Result { try CodexReviewer.review(context: request.context, selection: selection) }
             DispatchQueue.main.async {
                 var displayed = false
                 switch result {
@@ -333,6 +335,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settingsController = controller
         }
         settingsController?.update(customURL: storage.appendingPathComponent("avatar.gif"))
+        settingsController?.loadModels()
         settingsController?.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
         settingsController?.window?.makeKeyAndOrderFront(nil)

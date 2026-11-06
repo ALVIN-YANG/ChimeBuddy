@@ -18,18 +18,21 @@ import Foundation
         state.sessions.select(id)
         state.sessions.updateTitle(metadata.name, for: id)
         let replay = CommandLine.arguments.contains("--roast")
+        let selection = CodexModelPreferences.load()
         var invoked = false
         for event in events {
             let live = replay && event.id == events.last?.id
             if let request = state.receive(event, live: live) {
-                let answer = try CodexReviewer.review(context: request.context)
+                let answer = try CodexReviewer.review(context: request.context, selection: selection)
                 try state.complete(request, text: answer)
                 invoked = true
             }
         }
         let output: [String: Any] = ["state": "current", "sessionID": id, "name": state.sessions.title(for: id),
                                     "historyMessages": state.sessions.history.count, "latestKind": events.last?.kind ?? "",
-                                    "modelInvoked": invoked, "cachedRoast": state.text ?? ""]
+                                    "modelInvoked": invoked, "cachedRoast": state.text ?? "",
+                                    "configuredModel": selection?.model ?? "default",
+                                    "configuredReasoningEffort": selection?.effort ?? "default"]
         let json = try JSONSerialization.data(withJSONObject: output, options: [.prettyPrinted, .sortedKeys])
         print(String(data: json, encoding: .utf8)!)
     }

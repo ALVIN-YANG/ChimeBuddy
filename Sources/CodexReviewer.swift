@@ -6,7 +6,7 @@ enum CodexReviewer {
     // Independent ephemeral request: never resume the user's working chat.
     // A temporary working directory also keeps project-scoped observer hooks
     // from observing their own commentary.
-    static func review(context: String) throws -> String {
+    static func review(context: String, selection: CodexModelSelection? = CodexModelPreferences.load()) throws -> String {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("chimebuddy-review-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -31,7 +31,7 @@ enum CodexReviewer {
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = ["exec", "--ignore-user-config", "--ephemeral", "--skip-git-repo-check",
                              "--sandbox", "read-only", "-C", directory.path, "--color", "never",
-                             "-o", output.path, "-"]
+                             "-o", output.path] + (selection?.arguments ?? []) + ["-"]
         process.standardInput = input
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
