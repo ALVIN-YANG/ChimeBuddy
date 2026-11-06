@@ -79,6 +79,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var refreshingTitles = false
     var titleSessionIDs: [String] = []
     var workspaceObservers: [NSObjectProtocol] = []
+    var liveEventIDs = Set<String>()
+    var titleRetryCounts: [String: Int] = [:]
+    var titleRetry: DispatchWorkItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -220,6 +223,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return event
             }.sorted { $0.receivedAt < $1.receivedAt }
         for event in events {
+            liveEventIDs.insert(event.id)
             let previousSessionID = sessions.selectedID
             let affectsSelection = sessions.receive(event)
             refreshSessions()
@@ -228,25 +232,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 writeReceipt(["state": "receivedInBackground", "eventID": event.id, "simulated": event.simulated])
                 continue
             }
-            reviewGeneration = UUID()
-            pendingReviewEventID = nil
-            refreshStatus()
-            if paused {
-                if previousSessionID != sessions.selectedID {
-                    titleLabel.stringValue = "已跟随新的会话"
-                    messageLabel.stringValue = "消息显示已暂停，恢复后可点评此会话。"
-                }
-                writeReceipt(["state": "receivedWhilePaused", "eventID": event.id, "simulated": event.simulated])
-                continue
-            }
-            titleLabel.stringValue = (event.simulated ? "[模拟] " : "[Hooks] ") + (event.kind == "Stop" ? "Codex 回答结束" : "收到你的消息")
-            messageLabel.stringValue = String(event.text.prefix(130))
-            presentPanel()
-            panel.displayIfNeeded()
-            writeReceipt(["state": "displayed", "eventID": event.id, "kind": event.kind,
-                          "session": event.session, "turn": event.turn, "simulated": event.simulated])
-            if !event.simulated && event.kind == "Stop" && autoReview { reviewLatest() }
+            displayFollowedEvent(event, switched: previousSessionID != sessions.selectedID)
         }
+    }
+
+    func displayFollowedEvent(_ event: HookEvent, switched: Bool, identityResolved: Bool = false) {
+        reviewGeneration = UUID()
+        pendingReviewEventID = nil
+        refreshStatus()
+        if paused {
+            if switched {
+                titleLabel.stringValue = "已跟随新的会话"
+                messageLabel.stringValue = "消息显示已暂停，恢复后可点评此会话。"
+            }
+            writeReceipt(["state": "receivedWhilePaused", "eventID": event.id, "simulated": event.simulated])
+            return
+        }
+        titleLabel.stringValue = event.kind == "Stop" ? "Codex 回答结束" : "收到你的消息"
+        messageLabel.stringValue = String(event.text.prefix(130))
+        presentPanel()
+        panel.displayIfNeeded()
+        writeReceipt(["state": identityResolved ? "identityResolved" : "displayed", "eventID": event.id,
+                      "kind": event.kind, "session": event.session, "simulated": event.simulated])
+        if event.kind == "Stop" && autoReview && liveEventIDs.contains(event.id) { reviewLatest() }
     }
 
     func refreshSessions() {
@@ -271,8 +279,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self = self else { return }
                 self.refreshingTitles = false
                 if case .success(let titles) = result {
-                    for title in titles { self.sessions.updateTitle(title.name, for: title.id) }
+                    let previousSessionID = self.sessions.selectedID
+                    let previousEventID = self.lastEvent?.id
+                    for title in titles {
+                        self.sessions.updateTitle(title.name, for: title.id)
+                        self.sessions.confirmSession(title.id)
+                    }
                     self.refreshSessions()
+                    if previousEventID != self.lastEvent?.id, let event = self.lastEvent {
+                        self.displayFollowedEvent(event, switched: previousSessionID != self.sessions.selectedID, identityResolved: true)
+                    }
+                    let resolved = Set(titles.map { $0.id })
+                    let pending = ids.filter { !resolved.contains($0) && (self.titleRetryCounts[$0] ?? 0) < 3 }
+                    if !pending.isEmpty {
+                        for id in pending { self.titleRetryCounts[id, default: 0] += 1 }
+                        self.titleRetry?.cancel()
+                        let retry = DispatchWorkItem { [weak self] in self?.refreshTitles() }
+                        self.titleRetry = retry
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: retry)
+                    }
                 } else {
                     self.sessionLabel.toolTip = "会话名刷新失败，下次消息时重试"
                     self.titleSessionIDs = []
