@@ -19,8 +19,8 @@ open .build/ChimeBuddy.app
 
 - 气泡底部可选择已经收到事件的会话；显示短标题和会话 ID。固定选择后，后台会话不会切换上下文，切换前发起的点评不能覆盖新会话。选择在重启后保留。
 - 这是手动选择，不是 Codex 前台会话自动跟随。本机公开协议未找到界面选中会话通知；当前只接入此项目，不扫描其他项目的聊天历史。
-- 气泡内的“设置”按钮与菜单栏 🐥 提供相同菜单。
-- 导入 GIF：选择不超过 20 MB 的有效 GIF，复制到应用数据目录，重启后恢复；可恢复默认小鸡。
+- 气泡内的“设置”按钮与菜单栏 ChimeBuddy 提供相同菜单。
+- 导入 GIF：选择不超过 20 MB 的有效 GIF，复制到应用数据目录，重启后恢复；可恢复默认 Codex 伙伴。
 - 暂停消息显示：暂停弹出，仍在本地接收事件；不是停用 Hooks。
 - 专家、吐槽、双开：双开并发两次独立请求。默认专家模式。
 - 点评最新回合：取最近真实事件所属会话最多 6 条摘录，每条最多 500 字符；不混入其他会话或模拟事件。
@@ -34,7 +34,7 @@ open .build/ChimeBuddy.app
 - 仅接受上述固定工作目录的两种事件，每条最多保存 500 个字符，气泡最多显示 130 个字符。
 - 事件保存在 `~/Library/Application Support/ChimeBuddy/events/`，窗口处理回执在同目录的 `receipts.jsonl`；这是本地验证数据，不会自动清理。
 - `last-hook-invocation.json` 只记录最近入口调用的时间、输入字节数及模拟标记，用于区分未调用和被过滤；不保存被拒绝的正文。
-- 菜单栏 🐥 → 退出 ChimeBuddy。停止 Hook 接入时，在 Codex 禁用这两项或移除此项目的 `.codex/hooks.json`。
+- 菜单栏 ChimeBuddy → 退出 ChimeBuddy。停止 Hook 接入时，在 Codex 禁用这两项或移除此项目的 `.codex/hooks.json`。
 - `--hook --simulate` 只测试接收入口，模拟事件不加入会话列表，也不发送给模型，不能作为真实 Codex 接入证据。
 
 ## 本机验证（2026-11-05）
@@ -53,3 +53,7 @@ open .build/ChimeBuddy.app
 - `bash scripts/test.sh` 验证模拟隔离、后台隔离、选中会话历史、排序与去重。详情见 [验收记录](docs/verification/2026-11-05.md)。
 
 参考：[Codex Hooks](https://learn.chatgpt.com/docs/hooks)、[Apple 全屏空间行为](https://developer.apple.com/documentation/appkit/nswindow/collectionbehavior-swift.struct/canjoinallapplications)。
+
+## 界面与默认形象
+
+2026-11-06 更新为中性灰白/炭灰、细边框和系统字体，跟随系统浅色/深色。默认形象为参考图生成的银白龙 Q 版静态 PNG；已有自定义 GIF 优先保留。右上角关闭按钮和底部会话/设置入口保留。角色资源与生成提示词见 [视觉记录](docs/design/2026-11-06-visual-refresh.md)。

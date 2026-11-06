@@ -63,7 +63,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var fd: Int32 = -1
     var hiddenByUser = false
     var avatar: NSImageView!
-    var defaultFace: NSTextField!
     var connectionLabel: NSTextField!
     var pauseItem: NSMenuItem!
     var paused = UserDefaults.standard.bool(forKey: "displayPaused")
@@ -79,10 +78,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        panel = BuddyPanel(contentRect: NSRect(x: 0, y: 0, width: 350, height: 220),
+        panel = BuddyPanel(contentRect: NSRect(x: 0, y: 0, width: 420, height: 252),
                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.title = "ChimeBuddy"
-        panel.appearance = NSAppearance(named: .aqua)
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .canJoinAllApplications]
         panel.isFloatingPanel = true
@@ -92,58 +90,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.isMovableByWindowBackground = true
         panel.hasShadow = true
 
-        let view = NSView(frame: panel.contentView!.bounds)
-        view.wantsLayer = true
-        view.layer?.backgroundColor = NSColor(calibratedRed: 0.98, green: 0.96, blue: 0.91, alpha: 0.98).cgColor
-        view.layer?.cornerRadius = 24
-        let face = NSTextField(labelWithString: "🐥")
-        defaultFace = face
-        face.font = .systemFont(ofSize: 42)
-        face.frame = NSRect(x: 20, y: 150, width: 60, height: 55)
-        avatar = NSImageView(frame: NSRect(x: 16, y: 146, width: 66, height: 66))
+        let view = BuddySurface(frame: panel.contentView!.bounds)
+        let brand = NSTextField(labelWithString: "Codex 伙伴")
+        brand.font = .systemFont(ofSize: 11, weight: .medium)
+        brand.textColor = .secondaryLabelColor
+        brand.frame = NSRect(x: 18, y: 226, width: 200, height: 17)
+        view.addSubview(brand)
+        avatar = NSImageView(frame: NSRect(x: 12, y: 63, width: 128, height: 155))
         avatar.imageScaling = .scaleProportionallyUpOrDown
         avatar.animates = true
-        avatar.isHidden = true
+        avatar.setAccessibilityLabel("Codex 拟人伙伴")
         titleLabel = NSTextField(labelWithString: "等待 Codex 消息")
-        titleLabel.font = .boldSystemFont(ofSize: 15)
-        titleLabel.textColor = .black
-        titleLabel.frame = NSRect(x: 87, y: 171, width: 213, height: 25)
-        let closeButton = NSButton(title: "×", target: self, action: #selector(hidePanel))
-        closeButton.frame = NSRect(x: 307, y: 184, width: 28, height: 28)
+        titleLabel.font = .systemFont(ofSize: 14, weight: .semibold)
+        titleLabel.textColor = .labelColor
+        titleLabel.frame = NSRect(x: 152, y: 192, width: 246, height: 22)
+        let closeButton = NSButton(title: "", target: self, action: #selector(hidePanel))
+        closeButton.frame = NSRect(x: 386, y: 222, width: 22, height: 22)
         closeButton.isBordered = false
-        closeButton.font = .systemFont(ofSize: 23)
-        closeButton.contentTintColor = .darkGray
-        closeButton.toolTip = "隐藏气泡，可从菜单栏 🐥 重新打开"
+        closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "关闭气泡")
+        closeButton.contentTintColor = .secondaryLabelColor
+        closeButton.toolTip = "隐藏气泡，可从菜单栏重新打开"
         closeButton.setAccessibilityLabel("关闭气泡")
         view.addSubview(closeButton)
         connectionLabel = NSTextField(labelWithString: "尚未收到真实事件")
         connectionLabel.font = .systemFont(ofSize: 11)
-        connectionLabel.textColor = .darkGray
-        connectionLabel.frame = NSRect(x: 87, y: 150, width: 245, height: 20)
-        messageLabel = NSTextField(wrappingLabelWithString: "等待本项目的真实对话事件。\n菜单栏 🐥 可导入 GIF、切换模式和点评。\n点评使用 Codex 用量，自动点评默认关闭。")
+        connectionLabel.textColor = .secondaryLabelColor
+        connectionLabel.frame = NSRect(x: 152, y: 172, width: 246, height: 17)
+        messageLabel = NSTextField(wrappingLabelWithString: "在这里查看建议与吐槽。\n选择会话后，从设置开始点评。")
         messageLabel.font = .systemFont(ofSize: 13)
-        messageLabel.textColor = .darkGray
-        messageLabel.frame = NSRect(x: 22, y: 48, width: 306, height: 95)
-        view.addSubview(face)
+        messageLabel.textColor = .labelColor
+        messageLabel.frame = NSRect(x: 152, y: 57, width: 246, height: 102)
         view.addSubview(avatar)
         view.addSubview(connectionLabel)
         view.addSubview(titleLabel)
         view.addSubview(messageLabel)
-        sessionPicker = NSPopUpButton(frame: NSRect(x: 20, y: 10, width: 245, height: 27))
+        sessionPicker = NSPopUpButton(frame: NSRect(x: 16, y: 10, width: 342, height: 26))
+        sessionPicker.isBordered = false
+        sessionPicker.font = .systemFont(ofSize: 11)
         sessionPicker.target = self
         sessionPicker.action = #selector(selectSession)
         view.addSubview(sessionPicker)
-        let settings = NSButton(title: "设置", target: self, action: #selector(showSettings))
-        settings.frame = NSRect(x: 272, y: 10, width: 60, height: 27)
+        let settings = NSButton(title: "", target: self, action: #selector(showSettings))
+        settings.frame = NSRect(x: 374, y: 10, width: 28, height: 26)
+        settings.image = NSImage(systemSymbolName: "slider.horizontal.3", accessibilityDescription: "设置")
+        settings.isBordered = false
+        settings.contentTintColor = .secondaryLabelColor
+        settings.toolTip = "模式与设置"
+        settings.setAccessibilityLabel("设置")
         view.addSubview(settings)
         panel.contentView = view
         loadAvatar()
         if let screen = NSScreen.main {
-            panel.setFrameOrigin(NSPoint(x: screen.visibleFrame.maxX - 380, y: screen.visibleFrame.minY + 70))
+            panel.setFrameOrigin(NSPoint(x: screen.visibleFrame.maxX - 450, y: screen.visibleFrame.minY + 70))
         }
         presentPanel()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.title = "🐥"
+        statusItem.button?.image = NSImage(systemSymbolName: "bubble.left.and.text.bubble.right", accessibilityDescription: "ChimeBuddy")
+        statusItem.button?.toolTip = "ChimeBuddy · Codex 伙伴"
         let menu = NSMenu()
         menu.addItem(withTitle: "显示气泡", action: #selector(showPanel), keyEquivalent: "")
         menu.addItem(withTitle: "隐藏气泡", action: #selector(hidePanel), keyEquivalent: "")
@@ -151,7 +154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pauseItem.state = paused ? .on : .off
         menu.addItem(NSMenuItem.separator())
         menu.addItem(withTitle: "导入 GIF 形象…", action: #selector(importAvatar), keyEquivalent: "")
-        menu.addItem(withTitle: "恢复默认小鸡", action: #selector(resetAvatar), keyEquivalent: "")
+        menu.addItem(withTitle: "恢复默认 Codex 伙伴", action: #selector(resetAvatar), keyEquivalent: "")
         menu.addItem(NSMenuItem.separator())
         for option in ReviewMode.allCases {
             let item = menu.addItem(withTitle: option.title + "模式", action: #selector(selectMode(_:)), keyEquivalent: "")
@@ -188,6 +191,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         source?.setEventHandler { [weak self] in self?.receive() }
         source?.resume()
         writeReceipt(["state": "ready", "pid": ProcessInfo.processInfo.processIdentifier])
+        // Explicit local visual fixture; no model request or conversation write.
+        if CommandLine.arguments.contains("--preview-light") || CommandLine.arguments.contains("--preview-dark") {
+            panel.appearance = NSAppearance(named: CommandLine.arguments.contains("--preview-light") ? .aqua : .darkAqua)
+            titleLabel.stringValue = "双开点评 · 样式预览"
+            connectionLabel.stringValue = "示例内容 · 不调用模型"
+            messageLabel.stringValue = "专家：先确认需求和验收条件，再做最小改动。不要把测试通过当作完整交付。\n吐槽：只想加个按钮，差点收到一座软件产业园。"
+        }
     }
 
     func receive() {
@@ -246,7 +256,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func showSettings() {
-        statusItem.menu?.popUp(positioning: nil, at: NSPoint(x: 270, y: 38), in: panel.contentView)
+        statusItem.menu?.popUp(positioning: nil, at: NSPoint(x: 374, y: 38), in: panel.contentView)
     }
 
     @objc func selectMode(_ sender: NSMenuItem) {
@@ -322,11 +332,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func loadAvatar() {
-        let url = storage.appendingPathComponent("avatar.gif")
-        guard let image = NSImage(contentsOf: url) else { return }
-        avatar.image = image
-        avatar.isHidden = false
-        defaultFace.isHidden = true
+        let custom = storage.appendingPathComponent("avatar.gif")
+        if let image = NSImage(contentsOf: custom) {
+            avatar.image = image
+        } else if let url = Bundle.main.url(forResource: "codex-companion", withExtension: "png") {
+            avatar.image = NSImage(contentsOf: url)
+        } else {
+            avatar.image = NSImage(systemSymbolName: "terminal", accessibilityDescription: "Codex 伙伴")
+        }
     }
 
     @objc func importAvatar() {
@@ -362,9 +375,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let url = storage.appendingPathComponent("avatar.gif")
         do {
             if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
-            avatar.image = nil
-            avatar.isHidden = true
-            defaultFace.isHidden = false
+            loadAvatar()
         } catch {
             let alert = NSAlert(error: error)
             alert.runModal()

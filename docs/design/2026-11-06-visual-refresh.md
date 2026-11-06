@@ -11,6 +11,6 @@ Create one transparent-background mascot PNG for a native macOS Codex companion 
 ## 本地视觉检查
 
 - 默认运行：跟随当前系统深色，已通过实际窗口截图检查。
-- `open -n .build/ChimeBuddy.app --args --preview-light`：仅用于浅色双段文字预览，不调用模型或写入会话。
+- `open -n .build/ChimeBuddy.app --args --preview-light`：浅色双段文字预览已通过实际截图检查，文字无裁切、透明边缘正常，不调用模型或写入会话。
 - `--preview-dark`：对应深色预览。
 - 最终交付恢复正常运行，仍使用真实会话状态。
