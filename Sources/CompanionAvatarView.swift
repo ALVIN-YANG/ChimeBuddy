@@ -10,8 +10,33 @@ final class CompanionAvatarView: NSImageView {
     private var started = Date()
     private var timer: Timer?
     private var displayedFrame = -1
+    private var dragAnchor: NSPoint?
+    private var originalOrigin: NSPoint?
+    private var dragged = false
 
-    override func mouseDown(with event: NSEvent) { onClick?() }
+    override func mouseDown(with event: NSEvent) {
+        guard let window = window else { return }
+        originalOrigin = window.frame.origin
+        dragAnchor = NSPoint(x: window.frame.minX + event.locationInWindow.x, y: window.frame.minY + event.locationInWindow.y)
+        dragged = false
+    }
+    override func mouseDragged(with event: NSEvent) {
+        guard let window = window, let anchor = dragAnchor, let origin = originalOrigin else { return }
+        let dx = window.frame.minX + event.locationInWindow.x - anchor.x
+        let dy = window.frame.minY + event.locationInWindow.y - anchor.y
+        if abs(dx) + abs(dy) > 3 { dragged = true }
+        guard dragged else { return }
+        var point = NSPoint(x: origin.x + dx, y: origin.y + dy)
+        if let screen = window.screen {
+            point.x = min(max(point.x, screen.visibleFrame.minX), screen.visibleFrame.maxX - window.frame.width)
+            point.y = min(max(point.y, screen.visibleFrame.minY), screen.visibleFrame.maxY - window.frame.height)
+        }
+        window.setFrameOrigin(point)
+    }
+    override func mouseUp(with event: NSEvent) {
+        if !dragged { onClick?() }
+        dragAnchor = nil; originalOrigin = nil
+    }
     override func accessibilityPerformPress() -> Bool { onClick?(); return true }
     func setMood(_ value: CompanionMood) {
         mood = value

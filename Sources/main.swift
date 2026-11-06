@@ -62,7 +62,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var seen = Set<String>()
     var fd: Int32 = -1
     var hiddenByUser = false
-    var avatar: NSImageView!
+    var avatar: CompanionAvatarView!
+    var speechViews: [NSView] = []
+    var visualPreview: Bool { CommandLine.arguments.contains("--preview-light") || CommandLine.arguments.contains("--preview-dark") }
+    var buddySurface: BuddySurface!
     var connectionLabel: NSTextField!
     var pauseItem: NSMenuItem!
     var paused = UserDefaults.standard.bool(forKey: "displayPaused")
@@ -85,7 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        panel = BuddyPanel(contentRect: NSRect(x: 0, y: 0, width: 420, height: 252),
+        panel = BuddyPanel(contentRect: NSRect(x: 0, y: 0, width: 440, height: 282),
                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.title = "ChimeBuddy"
         panel.level = .floating
@@ -98,21 +101,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.hasShadow = true
 
         let view = BuddySurface(frame: panel.contentView!.bounds)
-        let brand = NSTextField(labelWithString: "Codex 伙伴")
-        brand.font = .systemFont(ofSize: 11, weight: .medium)
-        brand.textColor = .secondaryLabelColor
-        brand.frame = NSRect(x: 18, y: 226, width: 200, height: 17)
-        view.addSubview(brand)
-        avatar = NSImageView(frame: NSRect(x: 12, y: 63, width: 128, height: 155))
+        buddySurface = view
+        view.pointerPassthroughEnabled = !visualPreview
+        avatar = CompanionAvatarView(frame: BuddySurface.pet)
         avatar.imageScaling = .scaleProportionallyUpOrDown
         avatar.animates = true
-        avatar.setAccessibilityLabel("Codex 拟人伙伴")
+        avatar.setAccessibilityLabel("Codex 伙伴，点击收起或展开气泡")
+        avatar.setAccessibilityRole(.button)
+        avatar.onClick = { [weak self] in self?.toggleSpeech() }
         titleLabel = NSTextField(labelWithString: "等待 Codex 消息")
         titleLabel.font = .systemFont(ofSize: 14, weight: .semibold)
         titleLabel.textColor = .labelColor
-        titleLabel.frame = NSRect(x: 152, y: 192, width: 246, height: 22)
+        titleLabel.frame = NSRect(x: 24, y: 222, width: 255, height: 22)
         let closeButton = NSButton(title: "", target: self, action: #selector(hidePanel))
-        closeButton.frame = NSRect(x: 386, y: 222, width: 22, height: 22)
+        closeButton.frame = NSRect(x: 280, y: 248, width: 22, height: 22)
         closeButton.isBordered = false
         closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "关闭气泡")
         closeButton.contentTintColor = .secondaryLabelColor
@@ -122,33 +124,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         connectionLabel = NSTextField(labelWithString: "尚未收到真实事件")
         connectionLabel.font = .systemFont(ofSize: 11)
         connectionLabel.textColor = .secondaryLabelColor
-        connectionLabel.frame = NSRect(x: 152, y: 172, width: 246, height: 17)
+        connectionLabel.frame = NSRect(x: 24, y: 162, width: 270, height: 17)
         messageLabel = NSTextField(wrappingLabelWithString: "在这里查看建议与吐槽。\n在哪个会话发送消息，我就跟到哪里。")
         messageLabel.font = .systemFont(ofSize: 13)
         messageLabel.textColor = .labelColor
-        messageLabel.frame = NSRect(x: 152, y: 57, width: 246, height: 102)
+        messageLabel.frame = NSRect(x: 24, y: 107, width: 270, height: 108)
         view.addSubview(avatar)
+        connectionLabel.isHidden = true
         view.addSubview(connectionLabel)
         view.addSubview(titleLabel)
         view.addSubview(messageLabel)
         sessionLabel = NSTextField(labelWithString: "等待你发送消息")
-        sessionLabel.frame = NSRect(x: 18, y: 14, width: 340, height: 18)
+        sessionLabel.frame = NSRect(x: 24, y: 251, width: 248, height: 17)
         sessionLabel.font = .systemFont(ofSize: 11)
         sessionLabel.textColor = .secondaryLabelColor
         sessionLabel.lineBreakMode = .byTruncatingTail
         view.addSubview(sessionLabel)
         let settings = NSButton(title: "", target: self, action: #selector(showSettings))
-        settings.frame = NSRect(x: 374, y: 10, width: 28, height: 26)
+        settings.frame = NSRect(x: 271, y: 73, width: 28, height: 26)
         settings.image = NSImage(systemSymbolName: "slider.horizontal.3", accessibilityDescription: "设置")
         settings.isBordered = false
         settings.contentTintColor = .secondaryLabelColor
         settings.toolTip = "模式与设置"
         settings.setAccessibilityLabel("设置")
         view.addSubview(settings)
+        let review = NSButton(title: "点评一下", target: self, action: #selector(reviewLatest))
+        review.frame = NSRect(x: 22, y: 74, width: 82, height: 26)
+        review.bezelStyle = .rounded
+        view.addSubview(review)
+        speechViews = [titleLabel, messageLabel, sessionLabel, settings, review, closeButton]
         panel.contentView = view
         loadAvatar()
         if let screen = NSScreen.main {
-            panel.setFrameOrigin(NSPoint(x: screen.visibleFrame.maxX - 450, y: screen.visibleFrame.minY + 70))
+            panel.setFrameOrigin(NSPoint(x: screen.visibleFrame.maxX - 465, y: screen.visibleFrame.minY + 70))
         }
         presentPanel()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -210,7 +218,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             panel.appearance = NSAppearance(named: CommandLine.arguments.contains("--preview-light") ? .aqua : .darkAqua)
             titleLabel.stringValue = "双开点评 · 样式预览"
             connectionLabel.stringValue = "示例内容 · 不调用模型"
+            avatar.setMood(.speaking)
             messageLabel.stringValue = "专家：先确认需求和验收条件，再做最小改动。不要把测试通过当作完整交付。\n吐槽：只想加个按钮，差点收到一座软件产业园。"
+            presentPanel()
         }
     }
 
@@ -248,8 +258,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             writeReceipt(["state": "receivedWhilePaused", "eventID": event.id, "simulated": event.simulated])
             return
         }
-        titleLabel.stringValue = event.kind == "Stop" ? "Codex 回答结束" : "收到你的消息"
-        messageLabel.stringValue = String(event.text.prefix(130))
+        avatar.setMood(event.kind == "Stop" ? .idle : .thinking)
+        titleLabel.stringValue = event.kind == "Stop" ? "要听听我的看法吗？" : "我在听"
+        messageLabel.stringValue = event.kind == "Stop" ? "回复已结束。可以听专家建议，也可以来一句吐槽。" : "这条对话我跟上了。等回复结束，我再给你第二意见。"
         presentPanel()
         panel.displayIfNeeded()
         writeReceipt(["state": identityResolved ? "identityResolved" : "displayed", "eventID": event.id,
@@ -286,17 +297,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         self.sessions.confirmSession(title.id)
                     }
                     self.refreshSessions()
-                    if previousEventID != self.lastEvent?.id, let event = self.lastEvent {
+                    if previousEventID != self.lastEvent?.id, !self.visualPreview, let event = self.lastEvent {
                         self.displayFollowedEvent(event, switched: previousSessionID != self.sessions.selectedID, identityResolved: true)
                     }
-                    let resolved = Set(titles.map { $0.id })
+                    let resolved = Set(titles.filter { $0.name?.isEmpty == false }.map { $0.id })
                     let pending = ids.filter { !resolved.contains($0) && (self.titleRetryCounts[$0] ?? 0) < 3 }
                     if !pending.isEmpty {
                         for id in pending { self.titleRetryCounts[id, default: 0] += 1 }
                         self.titleRetry?.cancel()
                         let retry = DispatchWorkItem { [weak self] in self?.refreshTitles() }
                         self.titleRetry = retry
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: retry)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 5, execute: retry)
                     }
                 } else {
                     self.sessionLabel.toolTip = "会话名刷新失败，下次消息时重试"
@@ -308,7 +319,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func showSettings() {
-        statusItem.menu?.popUp(positioning: nil, at: NSPoint(x: 374, y: 38), in: panel.contentView)
+        statusItem.menu?.popUp(positioning: nil, at: NSPoint(x: 275, y: 103), in: panel.contentView)
     }
 
     @objc func selectMode(_ sender: NSMenuItem) {
@@ -345,11 +356,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let excerpts = history.map { ["role": $0.kind == "Stop" ? "assistant" : "user", "excerpt": $0.text] }
         guard let json = try? JSONSerialization.data(withJSONObject: excerpts), let context = String(data: json, encoding: .utf8) else { return }
         reviewing = true
+        writeReceipt(["state": "reviewStarted", "contextSession": contextSessionID ?? "", "contextEvent": contextEventID ?? ""])
         let generation = UUID()
         reviewGeneration = generation
         let selected = mode
+        avatar.setMood(.thinking)
         titleLabel.stringValue = selected.title + "正在点评…"
-        messageLabel.stringValue = "通过本机 Codex 独立请求，不会向原聊天写入消息。"
+        messageLabel.stringValue = "让我想一想，马上给你第二意见。"
         presentPanel()
         let options: [ReviewMode] = selected == .both ? [.expert, .roast] : [selected]
         let group = DispatchGroup()
@@ -368,6 +381,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         group.notify(queue: .main) { [weak self] in
             guard let self = self else { return }
             self.reviewing = false
+            self.writeReceipt(["state": "reviewCompleted", "contextSession": contextSessionID ?? "",
+                               "responseLengths": answers.mapValues { $0.count }, "discarded": self.reviewGeneration != generation])
             if let pending = self.pendingReviewEventID {
                 self.pendingReviewEventID = nil
                 if pending == self.lastEvent?.id && !self.paused {
@@ -378,8 +393,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard self.reviewGeneration == generation && !self.paused,
                   self.sessions.selectedID == contextSessionID,
                   self.lastEvent?.id == contextEventID else { return }
+            self.avatar.setMood(.speaking)
             self.titleLabel.stringValue = selected.title + "点评"
-            self.messageLabel.stringValue = options.map { $0.title + "：" + String((answers[$0.rawValue] ?? "没有返回内容").prefix(selected == .both ? 65 : 120)) }.joined(separator: "\n")
+            self.messageLabel.stringValue = options.map { $0.title + "：" + String((answers[$0.rawValue] ?? "没有返回内容").prefix(selected == .both ? 55 : 100)) }.joined(separator: "\n")
             self.presentPanel()
         }
     }
@@ -398,9 +414,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func loadAvatar() {
         let custom = storage.appendingPathComponent("avatar.gif")
         if let image = NSImage(contentsOf: custom) {
-            avatar.image = image
-        } else if let url = Bundle.main.url(forResource: "codex-companion", withExtension: "png") {
-            avatar.image = NSImage(contentsOf: url)
+            avatar.loadCustom(image)
+        } else if let url = Bundle.main.url(forResource: "codex-companion-atlas", withExtension: "png") {
+            avatar.loadDefault(at: url)
         } else {
             avatar.image = NSImage(systemSymbolName: "terminal", accessibilityDescription: "Codex 伙伴")
         }
@@ -453,6 +469,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pauseItem.state = paused ? .on : .off
         refreshStatus()
     }
+    func layoutSpeech() {
+        guard messageLabel != nil, speechViews.count == 6 else { return }
+        let measured = (messageLabel.stringValue as NSString).boundingRect(
+            with: NSSize(width: 266, height: 150), options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: messageLabel.font!]).height
+        let height = min(114, max(38, ceil(measured) + 6))
+        let bottom = 274 - (height + 115)
+        buddySurface.bubbleRect = NSRect(x: 8, y: bottom, width: 304, height: height + 115)
+        messageLabel.frame = NSRect(x: 24, y: bottom + 50, width: 270, height: height)
+        speechViews[3].setFrameOrigin(NSPoint(x: 271, y: bottom + 9))
+        speechViews[4].setFrameOrigin(NSPoint(x: 22, y: bottom + 10))
+        buddySurface.needsDisplay = true
+    }
+
+    func toggleSpeech() {
+        buddySurface.showsSpeech.toggle()
+        for view in speechViews { view.isHidden = !buddySurface.showsSpeech }
+        writeReceipt(["state": buddySurface.showsSpeech ? "speechExpanded" : "speechCollapsed"])
+    }
     @objc func hidePanel() { hiddenByUser = true; panel.orderOut(nil) }
 
     func writeReceipt(_ values: [String: Any]) {
@@ -473,7 +508,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     func presentPanel() {
         let codexIsFrontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.openai.codex"
-        if !hiddenByUser && codexIsFrontmost {
+        layoutSpeech()
+        if !hiddenByUser && (codexIsFrontmost || visualPreview) {
             panel.orderFrontRegardless()
         } else {
             panel.orderOut(nil)
