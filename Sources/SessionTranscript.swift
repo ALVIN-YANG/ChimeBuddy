@@ -69,7 +69,7 @@ enum TranscriptParser {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         return HookEvent(id: eventID, receivedAt: receivedAt, kind: kind,
-                         session: sessionID, turn: turn, text: String(trimmed.prefix(2000)), simulated: false)
+                         session: sessionID, turn: turn, text: ConversationWindow.excerpt(trimmed), simulated: false)
     }
 }
 
