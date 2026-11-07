@@ -59,7 +59,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var messageLabel: NSTextField!
     var speechScroll: NSScrollView!
     var laidOutSpeech: String?
-    var closeButton: NSButton!
     var avatar: CompanionAvatarView!
     var buddySurface: BuddySurface!
     var settingsController: SettingsWindowController?
@@ -112,7 +111,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         avatar.setAccessibilityRole(.button)
         avatar.onClick = { [weak self] in self?.toggleSpeech() }
         buddySurface.addSubview(avatar)
-        messageLabel = NSTextField(wrappingLabelWithString: "")
+        messageLabel = CompanionSpeechLabel(wrappingLabelWithString: "")
         messageLabel.font = .systemFont(ofSize: 13)
         messageLabel.textColor = .labelColor
         speechScroll = NSScrollView()
@@ -127,18 +126,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let companionMenu = NSMenu()
         let chatItem = companionMenu.addItem(withTitle: "和她聊聊…", action: #selector(showDialogue), keyEquivalent: "")
         chatItem.target = self
+        let hideItem = companionMenu.addItem(withTitle: "隐藏伙伴", action: #selector(hidePanel), keyEquivalent: "")
+        hideItem.target = self
         avatar.menu = companionMenu
         buddySurface.menu = companionMenu
         messageLabel.menu = companionMenu
+        speechScroll.menu = companionMenu
         avatar.toolTip = "点击收起/展开，右键和她聊聊"
-        closeButton = NSButton(title: "", target: self, action: #selector(hidePanel))
-        closeButton.isBordered = false
-        closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "隐藏伙伴")
-        closeButton.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 8, weight: .regular)
-        closeButton.contentTintColor = .secondaryLabelColor
-        closeButton.setAccessibilityLabel("隐藏伙伴")
-        closeButton.toolTip = "隐藏伙伴，可从菜单栏恢复"
-        buddySurface.addSubview(closeButton)
         panel.contentView = buddySurface
         loadAvatar()
         if let screen = NSScreen.main {
@@ -344,14 +338,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func setSpeechVisible(_ visible: Bool) {
         buddySurface.showsSpeech = visible
-        for view in [speechScroll!, closeButton!] { view.isHidden = !visible }
+        speechScroll.isHidden = !visible
     }
 
     func layoutSpeech() {
         let y = BuddySurface.pet.midY + 18
         let layout = SpeechBubbleLayout.measure(messageLabel, maximumHeight: buddySurface.bounds.height - y - 28)
-        let bubble = NSRect(x: BuddySurface.pet.minX + 20 - (layout.viewportSize.width + 32),
-                            y: y, width: layout.viewportSize.width + 32, height: layout.viewportSize.height + 16)
+        let bubble = NSRect(x: BuddySurface.pet.minX + 20 - (layout.viewportSize.width + 20),
+                            y: y, width: layout.viewportSize.width + 20, height: layout.viewportSize.height + 16)
         buddySurface.bubbleRect = bubble
         speechScroll.hasVerticalScroller = layout.scrolls
         speechScroll.verticalScroller?.controlSize = .small
@@ -363,7 +357,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             speechScroll.reflectScrolledClipView(speechScroll.contentView)
             laidOutSpeech = messageLabel.stringValue
         }
-        closeButton.frame = NSRect(x: bubble.maxX - 20, y: bubble.maxY - 20, width: 16, height: 16)
         buddySurface.needsDisplay = true
     }
 

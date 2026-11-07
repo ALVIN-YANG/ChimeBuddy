@@ -1,5 +1,14 @@
 import AppKit
 
+/// Read-only NSTextField's default mouse handler does not show its assigned
+/// menu. Route the secondary click explicitly so the bubble shares pet actions.
+final class CompanionSpeechLabel: NSTextField {
+    override func rightMouseDown(with event: NSEvent) {
+        guard let menu = menu else { super.rightMouseDown(with: event); return }
+        NSMenu.popUpContextMenu(menu, with: event, for: self)
+    }
+}
+
 /// A compact speech bubble beside an independent transparent character.
 final class BuddySurface: NSView {
     static let bubble = NSRect(x: 74, y: 109, width: 262, height: 58)
