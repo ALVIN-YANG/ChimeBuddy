@@ -57,6 +57,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var panel: BuddyPanel!
     var statusItem: NSStatusItem!
     var messageLabel: NSTextField!
+    var speechScroll: NSScrollView!
+    var laidOutSpeech: String?
     var closeButton: NSButton!
     var avatar: CompanionAvatarView!
     var buddySurface: BuddySurface!
@@ -113,7 +115,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         messageLabel = NSTextField(wrappingLabelWithString: "")
         messageLabel.font = .systemFont(ofSize: 13)
         messageLabel.textColor = .labelColor
-        buddySurface.addSubview(messageLabel)
+        speechScroll = NSScrollView()
+        speechScroll.borderType = .noBorder
+        speechScroll.drawsBackground = false
+        speechScroll.contentView.drawsBackground = false
+        speechScroll.scrollerStyle = .legacy
+        speechScroll.hasHorizontalScroller = false
+        speechScroll.documentView = messageLabel
+        buddySurface.addSubview(speechScroll)
         let companionMenu = NSMenu()
         let chatItem = companionMenu.addItem(withTitle: "和她聊聊…", action: #selector(showDialogue), keyEquivalent: "")
         chatItem.target = self
@@ -152,6 +161,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             messageLabel.stringValue = "说好养只桌宠，结果先给她安排了会话隔离和缓存管理。"
             if CommandLine.arguments.contains("--preview-long") {
                 messageLabel.stringValue = "说好只养一只安静的小桌宠，结果会话隔离、自动吐槽、缓存恢复和全屏跟随一个都不能少，她还没正式上岗，验收清单倒是先写满了一页。"
+            }
+            if CommandLine.arguments.contains("--preview-wrap") {
+                messageLabel.stringValue = "你刚催完修 bug，又追问这台机器有没有问题，急得像 bug 会被你瞪没了。"
+            }
+            if CommandLine.arguments.contains("--preview-overflow") {
+                messageLabel.stringValue = String(repeating: "这是一段超长气泡测试，内容保留，不用硬裁。", count: 18) + "最后一句也完整保留。"
             }
             setSpeechVisible(true)
             avatar.setMood(.speaking)
@@ -328,20 +343,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func setSpeechVisible(_ visible: Bool) {
         buddySurface.showsSpeech = visible
-        for view in [messageLabel!, closeButton!] { view.isHidden = !visible }
+        for view in [speechScroll!, closeButton!] { view.isHidden = !visible }
     }
 
     func layoutSpeech() {
-        let attributes: [NSAttributedString.Key: Any] = [.font: messageLabel.font!]
-        let text = messageLabel.stringValue as NSString
-        let width = min(220, max(90, ceil(text.size(withAttributes: attributes).width)))
-        let measured = text.boundingRect(with: NSSize(width: width, height: 200),
-                                        options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: attributes).height
-        let height = max(18, ceil(measured) + 2)
-        let bubble = NSRect(x: BuddySurface.pet.minX + 20 - (width + 42),
-                            y: BuddySurface.pet.midY + 18, width: width + 42, height: height + 20)
+        let y = BuddySurface.pet.midY + 18
+        let layout = SpeechBubbleLayout.measure(messageLabel, maximumHeight: buddySurface.bounds.height - y - 32)
+        let bubble = NSRect(x: BuddySurface.pet.minX + 20 - (layout.viewportSize.width + 42),
+                            y: y, width: layout.viewportSize.width + 42, height: layout.viewportSize.height + 20)
         buddySurface.bubbleRect = bubble
-        messageLabel.frame = NSRect(x: bubble.minX + 12, y: bubble.minY + 10, width: width, height: height)
+        speechScroll.hasVerticalScroller = layout.scrolls
+        speechScroll.frame = NSRect(origin: NSPoint(x: bubble.minX + 12, y: bubble.minY + 10), size: layout.viewportSize)
+        messageLabel.frame = NSRect(origin: .zero, size: layout.documentSize)
+        if laidOutSpeech != messageLabel.stringValue {
+            let top = messageLabel.isFlipped ? 0 : max(0, messageLabel.frame.height - speechScroll.contentSize.height)
+            speechScroll.contentView.scroll(to: NSPoint(x: 0, y: top))
+            speechScroll.reflectScrolledClipView(speechScroll.contentView)
+            laidOutSpeech = messageLabel.stringValue
+        }
         closeButton.frame = NSRect(x: bubble.maxX - 25, y: bubble.maxY - 25, width: 22, height: 22)
         buddySurface.needsDisplay = true
     }
