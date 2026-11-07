@@ -47,6 +47,7 @@ enum CodexReviewer {
         defer { try? input.close() }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
+        process.environment = CodexProcessEnvironment.current()
         process.arguments = ["exec", "--ignore-user-config", "--ephemeral", "--skip-git-repo-check",
                              "--sandbox", "read-only", "-C", directory.path, "--color", "never",
                              "-o", output.path, "--output-schema", schemaURL.path] + (selection?.arguments ?? []) + ["-"]

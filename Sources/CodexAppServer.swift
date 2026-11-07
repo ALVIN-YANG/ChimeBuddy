@@ -10,6 +10,7 @@ final class CodexAppServer {
 
     init(clientName: String) throws {
         process.executableURL = URL(fileURLWithPath: CodexReviewer.executable)
+        process.environment = CodexProcessEnvironment.current()
         process.arguments = ["app-server"]
         process.standardInput = input
         process.standardOutput = output

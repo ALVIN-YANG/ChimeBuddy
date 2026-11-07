@@ -16,5 +16,7 @@ swiftc -swift-version 5 Sources/ModelPreferences.swift Tests/ModelPreferencesTes
 .build/model-preferences-tests
 swiftc -swift-version 5 Sources/SessionStore.swift Sources/SharedMemory.swift Tests/SharedMemoryTests.swift -o .build/shared-memory-tests
 .build/shared-memory-tests
+swiftc -swift-version 5 Sources/CodexProcessEnvironment.swift Tests/CodexProcessEnvironmentTests.swift -o .build/codex-environment-tests
+.build/codex-environment-tests
 swiftc -swift-version 5 Sources/AvatarFrameRegistration.swift Tests/AvatarFrameRegistrationTests.swift -framework AppKit -o .build/avatar-registration-tests
 .build/avatar-registration-tests
