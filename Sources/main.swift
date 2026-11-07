@@ -119,7 +119,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         speechScroll.borderType = .noBorder
         speechScroll.drawsBackground = false
         speechScroll.contentView.drawsBackground = false
-        speechScroll.scrollerStyle = .legacy
+        speechScroll.scrollerStyle = .overlay
+        speechScroll.autohidesScrollers = true
         speechScroll.hasHorizontalScroller = false
         speechScroll.documentView = messageLabel
         buddySurface.addSubview(speechScroll)
@@ -133,7 +134,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         closeButton = NSButton(title: "", target: self, action: #selector(hidePanel))
         closeButton.isBordered = false
         closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "隐藏伙伴")
-        closeButton.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 9, weight: .regular)
+        closeButton.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 8, weight: .regular)
         closeButton.contentTintColor = .secondaryLabelColor
         closeButton.setAccessibilityLabel("隐藏伙伴")
         closeButton.toolTip = "隐藏伙伴，可从菜单栏恢复"
@@ -348,12 +349,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func layoutSpeech() {
         let y = BuddySurface.pet.midY + 18
-        let layout = SpeechBubbleLayout.measure(messageLabel, maximumHeight: buddySurface.bounds.height - y - 32)
-        let bubble = NSRect(x: BuddySurface.pet.minX + 20 - (layout.viewportSize.width + 42),
-                            y: y, width: layout.viewportSize.width + 42, height: layout.viewportSize.height + 20)
+        let layout = SpeechBubbleLayout.measure(messageLabel, maximumHeight: buddySurface.bounds.height - y - 28)
+        let bubble = NSRect(x: BuddySurface.pet.minX + 20 - (layout.viewportSize.width + 32),
+                            y: y, width: layout.viewportSize.width + 32, height: layout.viewportSize.height + 16)
         buddySurface.bubbleRect = bubble
         speechScroll.hasVerticalScroller = layout.scrolls
-        speechScroll.frame = NSRect(origin: NSPoint(x: bubble.minX + 12, y: bubble.minY + 10), size: layout.viewportSize)
+        speechScroll.verticalScroller?.controlSize = .small
+        speechScroll.frame = NSRect(origin: NSPoint(x: bubble.minX + 10, y: bubble.minY + 8), size: layout.viewportSize)
         messageLabel.frame = NSRect(origin: .zero, size: layout.documentSize)
         if laidOutSpeech != messageLabel.stringValue {
             let top = messageLabel.isFlipped ? 0 : max(0, messageLabel.frame.height - speechScroll.contentSize.height)
@@ -361,7 +363,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             speechScroll.reflectScrolledClipView(speechScroll.contentView)
             laidOutSpeech = messageLabel.stringValue
         }
-        closeButton.frame = NSRect(x: bubble.maxX - 25, y: bubble.maxY - 25, width: 22, height: 22)
+        closeButton.frame = NSRect(x: bubble.maxX - 20, y: bubble.maxY - 20, width: 16, height: 16)
         buddySurface.needsDisplay = true
     }
 

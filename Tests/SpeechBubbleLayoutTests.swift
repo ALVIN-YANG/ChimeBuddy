@@ -18,8 +18,9 @@ import AppKit
             assert(layout.viewportSize.height <= 141 && layout.viewportSize.width <= 220)
             if layout.scrolls {
                 let scroll = NSScrollView(frame: NSRect(origin: .zero, size: layout.viewportSize))
-                scroll.borderType = .noBorder; scroll.scrollerStyle = .legacy; scroll.hasVerticalScroller = true
-                assert(abs(scroll.contentSize.width - layout.documentSize.width) < 1, "Text measurement must account for the real scroller width")
+                scroll.borderType = .noBorder; scroll.scrollerStyle = .overlay; scroll.hasVerticalScroller = true
+                scroll.verticalScroller?.controlSize = .small
+                assert(abs(scroll.contentSize.width - layout.documentSize.width - SpeechBubbleLayout.scrollerInset) < 1, "Text must leave an inset for the overlay without reserving a legacy column")
                 assert(layout.documentSize.height > layout.viewportSize.height)
             }
             assert(field.stringValue == text, "Layout cannot truncate the message")

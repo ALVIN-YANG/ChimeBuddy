@@ -1,6 +1,7 @@
 import AppKit
 
 struct SpeechBubbleLayout {
+    static let scrollerInset = NSScroller.scrollerWidth(for: .small, scrollerStyle: .overlay)
     let viewportSize: NSSize
     let documentSize: NSSize
     let scrolls: Bool
@@ -20,7 +21,9 @@ struct SpeechBubbleLayout {
         }
         let available = max(18, floor(maximumHeight))
         let scrolls = height(for: width) > available
-        let documentWidth = width - (scrolls ? NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy) : 0)
+        // The overlay does not reserve a column. Keep a small internal inset so
+        // its thumb never covers the last characters when it appears.
+        let documentWidth = width - (scrolls ? scrollerInset : 0)
         let documentHeight = height(for: documentWidth)
         return SpeechBubbleLayout(viewportSize: NSSize(width: width, height: min(available, documentHeight)),
                                   documentSize: NSSize(width: documentWidth, height: documentHeight), scrolls: scrolls)
