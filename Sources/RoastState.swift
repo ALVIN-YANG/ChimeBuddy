@@ -58,9 +58,9 @@ final class RoastState {
         let retained = Set(messages.map(\.id))
         dialogue[event.session] = (dialogue[event.session] ?? []).filter { retained.contains($0.id) }
         let quoted: [String: Any] = ["messages": messages.map {
-            ["speaker": $0.speaker, "audience": $0.audience, "text": $0.text]
+            ["speaker": $0.speaker, "audience": $0.audience, "text": ConversationWindow.excerpt($0.text)]
         }, "trigger": direct ? "user_to_buddy" : event.kind, "currentMessage": event.text,
-           "replyingTo": direct ? (text ?? "") : ""]
+           "replyingTo": direct ? (text.map { ConversationWindow.excerpt($0) } ?? "") : ""]
         guard let data = try? JSONSerialization.data(withJSONObject: quoted), let context = String(data: data, encoding: .utf8) else { return nil }
         latestRequest[event.session] = event.deliveryKey
         return RoastRequest(event: event, context: context, direct: direct)
@@ -86,6 +86,6 @@ final class RoastState {
     static func clean(_ text: String) -> String {
         var value = text.trimmingCharacters(in: .whitespacesAndNewlines)
         for prefix in ["吐槽：", "吐槽:"] where value.hasPrefix(prefix) { value = String(value.dropFirst(prefix.count)) }
-        return String(value.trimmingCharacters(in: .whitespacesAndNewlines).prefix(100))
+        return value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

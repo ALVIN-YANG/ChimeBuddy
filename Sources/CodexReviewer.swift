@@ -73,7 +73,9 @@ enum CodexReviewer {
         guard !direct || !answer.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw NSError(domain: "ChimeBuddy", code: 5, userInfo: [NSLocalizedDescriptionKey: "伙伴没有返回回复，请重试。"])
         }
-        return BuddyAnswer(text: String(answer.text.prefix(60)), profileUpdates: Array(answer.profileUpdates.prefix(2)),
+        // Brevity belongs in the prompt. Cutting at a character count can remove
+        // the end of a sentence before either the cache or bubble sees it.
+        return BuddyAnswer(text: answer.text, profileUpdates: Array(answer.profileUpdates.prefix(2)),
                            projectUpdates: Array(answer.projectUpdates.prefix(2)))
     }
 }

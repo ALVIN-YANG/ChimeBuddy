@@ -66,6 +66,10 @@ import Foundation
         let long = "开头要求" + String(repeating: "中", count: 3000) + "最终结论"
         let excerpt = ConversationWindow.excerpt(long)
         assert(excerpt.count <= 2000 && excerpt.hasPrefix("开头要求") && excerpt.hasSuffix("最终结论"))
+        let fullReply = String(repeating: "完整的回复不应该在字符边界被截断。", count: 10) + "这里才是结尾。"
+        let fullRequest = window.reply("说完整", sessionID: "C")!
+        try window.complete(fullRequest, text: fullReply)
+        assert(window.text == fullReply && SessionReviews(directory: directory.appendingPathComponent("window")).review(sessionID: "C", mode: "roast")?.text == fullReply)
         print("PASS: user and completion triggers, startup/background/simulation exclusion, isolated request context, late result guard, cache restore and restart deduplication")
     }
 }
