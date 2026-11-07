@@ -61,9 +61,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var avatar: CompanionAvatarView!
     var buddySurface: BuddySurface!
     var settingsController: SettingsWindowController?
+    var dialogueController: BuddyDialogueWindow?
+    var memoryController: MemoryWindowController?
     var hiddenByUser = false
     var collapsedByUser = false
     let state = RoastState(cache: SessionReviews(directory: storage))
+    let memory = SharedMemory(directory: storage)
     let selectionReader = DesktopSelectionReader()
     let launchedAt = Date()
     let observationQueue = DispatchQueue(label: "ChimeBuddy.observation", qos: .utility)
@@ -83,7 +86,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var metadataRetryAt = Date.distantPast
     var transcript: SessionTranscript?
     var liveSince = Date()
-    var seenHooks = Set<String>()
     var visualPreview: Bool { CommandLine.arguments.contains("--preview-light") || CommandLine.arguments.contains("--preview-dark") }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -112,6 +114,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         messageLabel.font = .systemFont(ofSize: 13)
         messageLabel.textColor = .labelColor
         buddySurface.addSubview(messageLabel)
+        let companionMenu = NSMenu()
+        let chatItem = companionMenu.addItem(withTitle: "和她聊聊…", action: #selector(showDialogue), keyEquivalent: "")
+        chatItem.target = self
+        avatar.menu = companionMenu
+        buddySurface.menu = companionMenu
+        messageLabel.menu = companionMenu
+        avatar.toolTip = "点击收起/展开，右键和她聊聊"
         closeButton = NSButton(title: "", target: self, action: #selector(hidePanel))
         closeButton.isBordered = false
         closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "隐藏伙伴")
@@ -189,6 +198,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             liveSince = max(launchedAt, page?.timestamp ?? Date())
             selectionGeneration = UUID()
             transcript = nil
+            dialogueController?.close()
+            dialogueController = nil
             state.sessions.select(nil)
             reviews.cancelAllOperations() // Running calls may finish into their own cache.
             render()
@@ -228,9 +239,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         render()
         writeReceipt(["state": "sessionSelected", "contextSession": value.id, "cacheRestored": state.text != nil])
+        if CommandLine.arguments.contains("--dialogue") && dialogueController == nil { showDialogue() }
     }
 
     func readMessages() {
+        // Hooks are a delivery inbox, not a transcript archive. Drain even when
+        // the transcript source is available or no Codex page is selected.
+        let urls = (try? FileManager.default.contentsOfDirectory(at: inbox, includingPropertiesForKeys: nil)) ?? []
+        let events = urls.filter { $0.pathExtension == "json" }.compactMap { url -> HookEvent? in
+            guard let data = try? Data(contentsOf: url), let value = try? JSONDecoder().decode(HookEvent.self, from: data) else { return nil }
+            try? FileManager.default.removeItem(at: url)
+            return value
+        }.sorted { $0.receivedAt < $1.receivedAt }
         guard let id = state.sessions.selectedID else { return }
         // Transcript first: it preserves typed user items, excludes tool output,
         // and covers every local project without installing additional Hooks.
@@ -242,12 +262,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // Use exactly one message source. A Hook has no transcript item ID,
         // so merging both would duplicate a user message or lose steering.
-        let urls = (try? FileManager.default.contentsOfDirectory(at: inbox, includingPropertiesForKeys: nil)) ?? []
-        let events = urls.filter { $0.pathExtension == "json" && !seenHooks.contains($0.lastPathComponent) }.compactMap { url -> HookEvent? in
-            guard let data = try? Data(contentsOf: url), let value = try? JSONDecoder().decode(HookEvent.self, from: data) else { return nil }
-            seenHooks.insert(url.lastPathComponent)
-            return value
-        }.sorted { $0.receivedAt < $1.receivedAt }
         for event in events where event.session == id {
             consume(event, live: event.receivedAt >= liveSince)
         }
@@ -260,34 +274,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func schedule(_ request: RoastRequest) {
         avatar.setMood(.thinking)
+        let memoryGeneration = memory.editGeneration
         writeReceipt(["state": "roastQueued", "contextSession": request.event.session, "eventKey": request.key, "kind": request.event.kind])
         reviews.addOperation { [weak self] in
             guard let self = self else { return }
             let current = DispatchQueue.main.sync { self.state.canStart(request) }
             guard current else { return }
             let selection = CodexModelPreferences.load()
+            let memorySnapshot = DispatchQueue.main.sync { self.memory.snapshot }
             DispatchQueue.main.async {
                 self.writeReceipt(["state": "roastStarted", "contextSession": request.event.session, "eventKey": request.key, "kind": request.event.kind,
                                    "model": selection?.model ?? "default", "reasoningEffort": selection?.effort ?? "default"])
             }
-            let result = Result { try CodexReviewer.review(context: request.context, selection: selection) }
+            let result = Result { try CodexReviewer.respond(context: request.context, direct: request.direct, memory: memorySnapshot, selection: selection) }
             DispatchQueue.main.async {
                 var displayed = false
                 switch result {
                 case .success(let answer):
                     do {
-                        try self.state.complete(request, text: answer)
+                        // Assistant output never authorizes a memory extraction.
+                        do { try self.memory.apply(answer, source: request.event, generation: memoryGeneration) }
+                        catch { self.writeReceipt(["state": "memorySaveFailed"]) }
+                        try self.state.complete(request, text: answer.text)
                         if self.state.canPresent(request) {
                             self.render()
-                            self.avatar.setMood(.speaking)
-                            displayed = true
+                            if !answer.text.isEmpty { self.avatar.setMood(.speaking); displayed = true }
                         }
-                    } catch { self.writeReceipt(["state": "roastCacheFailed", "contextSession": request.event.session]) }
+                        self.updateDialogue()
+                        if request.direct, self.dialogueController?.sessionID == request.event.session { self.dialogueController?.finish(requestKey: request.key) }
+                    } catch {
+                        self.writeReceipt(["state": "roastCacheFailed", "contextSession": request.event.session])
+                        if request.direct, self.dialogueController?.sessionID == request.event.session { self.dialogueController?.finish(error: "回复缓存失败，请重试。", requestKey: request.key) }
+                    }
                 case .failure(let error):
                     // Errors and connection status belong in diagnostics, never
                     // in the character's speech bubble. Keep the previous roast.
                     self.writeReceipt(["state": "roastFailed", "contextSession": request.event.session, "reason": error.localizedDescription])
                     if self.state.sessions.selectedID == request.event.session { self.render() }
+                    if request.direct, self.dialogueController?.sessionID == request.event.session { self.dialogueController?.finish(error: error.localizedDescription, requestKey: request.key) }
                 }
                 self.writeReceipt(["state": "roastCompleted", "contextSession": request.event.session,
                                    "eventKey": request.key, "kind": request.event.kind, "displayed": displayed])
@@ -332,6 +356,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let controller = SettingsWindowController()
             controller.onImport = { [weak self] in self?.importAvatar() }
             controller.onReset = { [weak self] in self?.resetAvatar() }
+            controller.onMemory = { [weak self] in self?.showMemory() }
             settingsController = controller
         }
         settingsController?.update(customURL: storage.appendingPathComponent("avatar.gif"))
@@ -339,6 +364,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsController?.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
         settingsController?.window?.makeKeyAndOrderFront(nil)
+    }
+    @objc func showMemory() {
+        if memoryController == nil { memoryController = MemoryWindowController(memory: memory) }
+        memoryController?.reload()
+        memoryController?.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        memoryController?.window?.makeKeyAndOrderFront(nil)
+    }
+    @objc func showDialogue() {
+        guard let id = state.sessions.selectedID else { return }
+        if dialogueController?.sessionID != id {
+            let controller = BuddyDialogueWindow(sessionID: id, title: state.sessions.title(for: id))
+            controller.onSend = { [weak self, weak controller] text in
+                guard let self = self, let request = self.state.reply(text, sessionID: id) else {
+                    controller?.finish(error: "会话已切换，请在当前会话重新打开。")
+                    return
+                }
+                controller?.bind(requestKey: request.key)
+                self.updateDialogue()
+                self.schedule(request)
+            }
+            dialogueController = controller
+        }
+        updateDialogue()
+        dialogueController?.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        dialogueController?.window?.makeKeyAndOrderFront(nil)
+    }
+    func updateDialogue() {
+        guard let id = dialogueController?.sessionID, state.sessions.selectedID == id else { return }
+        dialogueController?.update(messages: state.buddyMessages(sessionID: id), cached: state.text)
     }
     @objc func hidePanel() { hiddenByUser = true; panel.orderOut(nil) }
     @objc func showPanel() { hiddenByUser = false; presentPanel() }

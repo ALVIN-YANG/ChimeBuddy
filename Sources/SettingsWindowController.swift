@@ -12,6 +12,7 @@ final class SettingsWindowController: NSWindowController {
     private var loading = false
     var onImport: (() -> Void)?
     var onReset: (() -> Void)?
+    var onMemory: (() -> Void)?
 
     init() {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 380, height: 500),
@@ -79,9 +80,13 @@ final class SettingsWindowController: NSWindowController {
         refreshButton.target = self
         refreshButton.action = #selector(loadModels)
         content.addSubview(refreshButton)
+        let memoryButton = NSButton(title: "共享记忆…", target: self, action: #selector(openMemory))
+        memoryButton.bezelStyle = .rounded
+        memoryButton.frame = NSRect(x: 178, y: 50, width: 108, height: 28)
+        content.addSubview(memoryButton)
         modelHint.font = .systemFont(ofSize: 11)
         modelHint.textColor = .secondaryLabelColor
-        modelHint.frame = NSRect(x: 24, y: 19, width: 250, height: 50)
+        modelHint.frame = NSRect(x: 24, y: 10, width: 332, height: 34)
         content.addSubview(modelHint)
         window.center()
     }
@@ -103,6 +108,7 @@ final class SettingsWindowController: NSWindowController {
 
     @objc private func importAvatar() { onImport?() }
     @objc private func resetAvatar() { onReset?() }
+    @objc private func openMemory() { onMemory?() }
 
     @objc func loadModels() {
         guard !loading else { return }

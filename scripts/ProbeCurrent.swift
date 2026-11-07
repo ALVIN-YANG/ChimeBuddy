@@ -19,12 +19,15 @@ import Foundation
         state.sessions.updateTitle(metadata.name, for: id)
         let replay = CommandLine.arguments.contains("--roast")
         let selection = CodexModelPreferences.load()
+        let memory = SharedMemory(directory: storage)
         var invoked = false
         for event in events {
             let live = replay && event.id == events.last?.id
             if let request = state.receive(event, live: live) {
-                let answer = try CodexReviewer.review(context: request.context, selection: selection)
-                try state.complete(request, text: answer)
+                let generation = memory.editGeneration
+                let answer = try CodexReviewer.respond(context: request.context, direct: request.direct, memory: memory.snapshot, selection: selection)
+                try memory.apply(answer, source: event, generation: generation)
+                try state.complete(request, text: answer.text)
                 invoked = true
             }
         }
