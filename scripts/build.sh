@@ -14,6 +14,8 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 <key>CFBundleIdentifier</key><string>dev.chimebuddy.prototype</string>
 <key>CFBundleName</key><string>ChimeBuddy</string>
 <key>CFBundleExecutable</key><string>ChimeBuddy</string>
+<key>CFBundleShortVersionString</key><string>0.1.0</string>
+<key>CFBundleVersion</key><string>1</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>LSUIElement</key><true/>
 <key>LSMinimumSystemVersion</key><string>14.0</string>

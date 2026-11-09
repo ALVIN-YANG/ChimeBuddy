@@ -2,9 +2,26 @@
 
 原生 Swift / AppKit Codex 桌面伙伴。点击 Codex 中的会话时切换上下文；当前会话收到用户消息或 AI 最终回复时自动吐槽。气泡只显示正文，按内容收紧尺寸并贴近人物脸侧；超长内容可在气泡内滚动。没有吐槽缓存时只显示角色。
 
+<img src="Assets/codex-companion.png" alt="ChimeBuddy 默认银白龙伙伴" width="160" />
+
+- 原生 Swift / AppKit 悬浮窗口，不依赖 Electron 或内置浏览器。
+- 跟随当前本机会话，会话原话隔离；只取最近最多 10 轮上下文。
+- 支持 GIF 形象、角色动画、直接回怼、模型与推理档位选择。
+- 跨会话共享限长概况：用户画像 400 字、全部项目概况合计 800 字，可查看、修改、清空。
+
+## 安装
+
+需要 macOS 14 或更高版本，以及已安装并登录的 [Codex / ChatGPT 桌面版](https://chatgpt.com/download/)。当前程序寻找 `/Applications/ChatGPT.app` 内的 Codex CLI；其他安装位置需调整 `Sources/CodexReviewer.swift`。
+
+从 [Releases](https://github.com/ALVIN-YANG/ChimeBuddy/releases) 下载 Apple Silicon 安装包，解压后放入“应用程序”目录。当前为未公证原型，安装包仅作 ad-hoc 签名；macOS 可能阻止直接打开，也可按下方步骤自行构建。源码构建需要 Xcode Command Line Tools（`xcode-select --install`）。
+
+本项目是独立第三方原型，不是 OpenAI 官方插件。会话跟随依赖版本相关的本机日志格式，当前仅验证单个主窗口、本机会话；Codex 升级后可能需要适配。
+
 ## 运行与检查
 
 ```sh
+git clone https://github.com/ALVIN-YANG/ChimeBuddy.git
+cd ChimeBuddy
 bash scripts/test.sh
 bash scripts/build.sh
 open .build/ChimeBuddy.app
@@ -56,11 +73,11 @@ bash scripts/check-current.sh --roast
 
 ## 观察来源与边界
 
-当前安装的 Codex `26.1029.61003` 在桌面日志中输出页面路由，但不输出开源示例使用的窗口焦点字段。伙伴读取当前 Codex 主进程的 `IAB_LIFECYCLE received browser sidebar owner sync` 记录里的 `ownerRoutePath=/local/<UUID>`，再通过公开 `thread/read` 验证真实会话、读取名称及记录路径。这个日志名称来自宿主内部路由，伙伴界面仍是原生 NSPanel，不使用内置浏览器。
+开发时验证的 Codex `26.1029.61003` 在桌面日志中输出页面路由，但不输出开源示例使用的窗口焦点字段。伙伴读取当前 Codex 主进程的 `IAB_LIFECYCLE received browser sidebar owner sync` 记录里的 `ownerRoutePath=/local/<UUID>`，再通过公开 `thread/read` 验证真实会话、读取名称及记录路径。这个日志名称来自宿主内部路由，伙伴界面仍是原生 NSPanel，不使用内置浏览器。
 
 消息来源是被选中会话的本地记录：`event_msg.item_completed.UserMessage` 和 `event_msg.task_complete.last_agent_message`。只接受这些白名单事件，不把原始模型输入、工具记录或 commentary 当用户对话。该路径覆盖其他本机项目，不需要给每个项目新增 Hooks。
 
-原有项目级 `UserPromptSubmit` / `Stop` Hooks 保留作为没有记录路径时的备用来源；同一会话只使用一种来源，避免重复。它们依旧只接收固定目录 `/Users/USER/Documents/my-learn/ChimeBuddy`，未安装全局 Hooks、未更改信任状态。移动项目时应修改 `Sources/main.swift` 的备用目录过滤和 `.codex/hooks.json` 中的可执行路径。
+主观察路径不需要安装 Hooks。可选的项目级 `UserPromptSubmit` / `Stop` Hooks 仅作没有记录路径时的备用来源，同一会话只使用一种来源。个人 `.codex/hooks.json` 不随仓库分发；源码构建仅接受所在 checkout 的 Hook，分发安装包默认不接受 Hook。需要备用入口时，由调用方设置绝对目录 `CHIMEBUDDY_HOOK_WORKSPACE` 并执行 `ChimeBuddy --hook`。程序不安装全局 Hooks，也不替用户更改信任状态。
 
 日志和消息记录格式都是版本相关的兼容接口。Codex 升级后若无法确认会话，伙伴隐藏，不能退回“最近发过消息”的猜测。当前版本缺少焦点字段，因此同一进程出现多个主窗口路由时返回未知；多窗口跟随不在本次已验证范围。仅支持能通过本机 `thread/read` 返回记录路径的会话；远程会话没有验证。
 

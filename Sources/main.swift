@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import UniformTypeIdentifiers
 
-let workspace = "/Users/USER/Documents/my-learn/ChimeBuddy"
+let workspace = HookWorkspace.resolve(bundleURL: Bundle.main.bundleURL, environment: ProcessInfo.processInfo.environment)
 let storage = FileManager.default.homeDirectoryForCurrentUser
     .appendingPathComponent("Library/Application Support/ChimeBuddy")
 let inbox = storage.appendingPathComponent("events")
@@ -22,7 +22,7 @@ if CommandLine.arguments.contains("--hook") {
         if let data = try? JSONSerialization.data(withJSONObject: metadata) {
             try? data.write(to: storage.appendingPathComponent("last-hook-invocation.json"), options: .atomic)
         }
-        guard input.count <= 4_000_000,
+        guard let workspace = workspace, input.count <= 4_000_000,
               let object = try JSONSerialization.jsonObject(with: input) as? [String: Any],
               object["cwd"] as? String == workspace,
               let kind = object["hook_event_name"] as? String,
