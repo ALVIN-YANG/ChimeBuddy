@@ -1,10 +1,10 @@
 <p align="center">
-  <img src="docs/media/app-icon.png" width="96" height="96" alt="ChimeBuddy 银白龙对话伙伴图标" />
+  <img src="docs/media/app-icon.png?v=2" width="96" height="96" alt="ChimeBuddy 银白龙对话伙伴图标" />
 </p>
 <h1 align="center">ChimeBuddy</h1>
 <p align="center">跟着当前会话走的 macOS 桌面伙伴。会吐槽，也能和你聊。</p>
 <p align="center">
-  <a href="https://github.com/ALVIN-YANG/ChimeBuddy/releases/tag/v0.1.1">下载原型</a> ·
+  <a href="https://github.com/ALVIN-YANG/ChimeBuddy/releases/tag/v0.1.2">下载原型</a> ·
   <a href="#安装">安装</a> ·
   <a href="#使用">使用</a> ·
   <a href="https://blog.mlxb.cc/projects/#chimebuddy">个人作品</a>
@@ -37,7 +37,7 @@ ChimeBuddy 悬浮在 Codex 旁边，根据当前会话的用户输入和 AI 最�
 
 ### 下载运行
 
-1. 打开 [v0.1.1 Releases](https://github.com/ALVIN-YANG/ChimeBuddy/releases/tag/v0.1.1)，下载 `ChimeBuddy-v0.1.1-macos-arm64.zip`。
+1. 打开 [v0.1.2 Releases](https://github.com/ALVIN-YANG/ChimeBuddy/releases/tag/v0.1.2)，下载 `ChimeBuddy-v0.1.2-macos-arm64.zip`。
 2. 解压，把 `ChimeBuddy.app` 拖到“应用程序”目录，然后打开。
 3. 在 Codex 打开一个本机会话，保持 Codex 在前台。没有吐槽缓存时，先显示人物；发送一条新消息后才会请求新的吐槽。
 4. 在 macOS 顶部菜单栏找到双气泡图标，打开“设置…”选择模型，或导入自己的 GIF。
