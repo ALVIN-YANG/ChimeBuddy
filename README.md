@@ -1,23 +1,65 @@
-# ChimeBuddy
+<p align="center">
+  <img src="docs/media/app-icon.png" width="96" height="96" alt="ChimeBuddy 银白龙对话伙伴图标" />
+</p>
+<h1 align="center">ChimeBuddy</h1>
+<p align="center">跟着当前会话走的 macOS 桌面伙伴。会吐槽，也能和你聊。</p>
+<p align="center">
+  <a href="https://github.com/ALVIN-YANG/ChimeBuddy/releases/tag/v0.1.1">下载原型</a> ·
+  <a href="#安装">安装</a> ·
+  <a href="#使用">使用</a> ·
+  <a href="https://blog.mlxb.cc/projects/#chimebuddy">个人作品</a>
+</p>
+<p align="center">macOS 14+ · Apple Silicon · Swift / AppKit</p>
 
-原生 Swift / AppKit Codex 桌面伙伴。点击 Codex 中的会话时切换上下文；当前会话收到用户消息或 AI 最终回复时自动吐槽。气泡只显示正文，按内容收紧尺寸并贴近人物脸侧；超长内容可在气泡内滚动。没有吐槽缓存时只显示角色。
+ChimeBuddy 悬浮在 Codex 旁边，根据当前会话的用户输入和 AI 最终回复接一句话。切换会话时同步切换上下文；你也可以右键打开对话框，直接和她说话。
 
-<img src="Assets/codex-companion.png" alt="ChimeBuddy 默认银白龙伙伴" width="160" />
+<picture>
+  <source media="(prefers-reduced-motion: reduce) and (prefers-color-scheme: dark)" srcset="docs/media/companion-dark.png" />
+  <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/companion-light.png" />
+  <img src="docs/media/companion-demo.gif" width="752" alt="ChimeBuddy 原生界面演示：伙伴眨眼、思考、说话，以及气泡收起和展开" />
+</picture>
 
-- 原生 Swift / AppKit 悬浮窗口，不依赖 Electron 或内置浏览器。
-- 跟随当前本机会话，会话原话隔离；只取最近最多 10 轮上下文。
-- 支持 GIF 形象、角色动画、直接回怼、模型与推理档位选择。
-- 跨会话共享限长概况：用户画像 400 字、全部项目概况合计 800 字，可查看、修改、清空。
+*原生视图演示，文案为示例；动画时长不代表模型回复速度。[查看静态截图](#伙伴截图)。*
+
+- **跟随会话**：只点评当前会话，后台回复不会把伙伴切走。
+- **有来有回**：自动吐槽，也能直接聊天；气泡平时只放正文。
+- **可以换形象**：内置四种表情，也可以导入自己的 GIF。
+- **可以选模型**：从 Codex 读取可用模型和推理档位，使用本机登录。
+- **上下文分清楚**：会话原话隔离，跨会话只共享限长概况。
 
 ## 安装
 
-需要 macOS 14 或更高版本，以及已安装并登录的 [Codex / ChatGPT 桌面版](https://chatgpt.com/download/)。当前程序寻找 `/Applications/ChatGPT.app` 内的 Codex CLI；其他安装位置需调整 `Sources/CodexReviewer.swift`。
+### 先准备好
 
-从 [Releases](https://github.com/ALVIN-YANG/ChimeBuddy/releases) 下载 Apple Silicon 安装包，解压后放入“应用程序”目录。当前为未公证原型，安装包仅作 ad-hoc 签名；macOS 可能阻止直接打开，也可按下方步骤自行构建。源码构建需要 Xcode Command Line Tools（`xcode-select --install`）。
+- Apple Silicon Mac，macOS 14 或更高版本。当前安装包不支持 Intel Mac。
+- 已安装并登录的 [Codex / ChatGPT 桌面版](https://chatgpt.com/download/)。当前原型寻找 `/Applications/ChatGPT.app` 内的 Codex CLI；其他安装位置尚未自动适配。
+- 保留一个 Codex 主窗口，使用本机项目下的会话。远程会话和多主窗口尚未验证。
 
-本项目是独立第三方原型，不是 OpenAI 官方插件。会话跟随依赖版本相关的本机日志格式，当前仅验证单个主窗口、本机会话；Codex 升级后可能需要适配。
+### 下载运行
 
-## 运行与检查
+1. 打开 [v0.1.1 Releases](https://github.com/ALVIN-YANG/ChimeBuddy/releases/tag/v0.1.1)，下载 `ChimeBuddy-v0.1.1-macos-arm64.zip`。
+2. 解压，把 `ChimeBuddy.app` 拖到“应用程序”目录，然后打开。
+3. 在 Codex 打开一个本机会话，保持 Codex 在前台。没有吐槽缓存时，先显示人物；发送一条新消息后才会请求新的吐槽。
+4. 在 macOS 顶部菜单栏找到双气泡图标，打开“设置…”选择模型，或导入自己的 GIF。
+
+这是**未公证、仅 ad-hoc 签名的第三方原型**。如果 macOS 阻止打开，确认来源后可在“系统设置 → 隐私与安全性”检查是否提供“仍要打开”；详见 [Apple 的说明](https://support.apple.com/zh-cn/102445)。也可以使用下方的源码构建方式。
+
+安装包附有 `SHA256SUMS.txt`。将它与 ZIP 放在同一目录后，可以校验下载：
+
+```sh
+shasum -a 256 -c SHA256SUMS.txt
+```
+
+<details>
+<summary>从源码构建</summary>
+
+先安装 Xcode Command Line Tools，已安装则跳过：
+
+```sh
+xcode-select --install
+```
+
+然后执行：
 
 ```sh
 git clone https://github.com/ALVIN-YANG/ChimeBuddy.git
@@ -27,81 +69,90 @@ bash scripts/build.sh
 open .build/ChimeBuddy.app
 ```
 
-检查当前识别的会话和缓存，不调用模型：
+构建不需要 Electron、Node.js 或单独配置 API Key。只在重新导出 README GIF 时需要 `ffmpeg`。
+
+</details>
+
+## 使用
+
+| 想做什么 | 怎么操作 |
+| --- | --- |
+| 自动听她吐槽 | 在当前 Codex 会话发送消息，或等 AI 最终回复完成 |
+| 直接和她聊天 | 右键人物或气泡 → **和她聊聊…** |
+| 收起 / 展开气泡 | 点击人物 |
+| 移动伙伴 | 拖动人物 |
+| 隐藏伙伴 | 右键人物或气泡 → **隐藏伙伴** |
+| 重新显示 | 菜单栏双气泡图标 → **显示伙伴** |
+| 退出程序 | 菜单栏 → **退出 ChimeBuddy** |
+
+切到其他应用时伙伴隐藏，回到 Codex 才显示。切换 Codex 会话会恢复该会话自己的最后一条气泡缓存，关闭旧的伙伴对话框；不会把上一会话的聊天带进来。
+
+### 设置
+
+从菜单栏双气泡图标打开“设置…”。
+
+- **形象**：导入不超过 20 MB 的 GIF，或恢复默认银白龙伙伴。
+- **模型 / 推理档位**：读取 Codex 当前提供的选项，更改后从下一次请求生效；不会修改 Codex 原聊天的模型。
+- **共享记忆**：查看、修改、清空用户画像和项目概况。画像最多 **400 字**，全部项目概况合计最多 **800 字**。
+
+模型调用在独立的临时会话中进行，不往 Codex 原聊天发消息。使用已有的 [Codex 登录](https://learn.chatgpt.com/docs/auth)和用量；一次用户输入、一次 AI 最终回复各可触发一次调用，直接聊天也会调用模型。
+
+### 上下文和数据
+
+当前会话的 Codex 对话与伙伴对话共用最近**最多 10 轮**的窗口。不同会话的原话不混用；稳定偏好和项目概况可以共享。伙伴对话不另存长期档案，每个会话只保留最后一条气泡缓存供恢复。
+
+本地数据位于 `~/Library/Application Support/ChimeBuddy/`，包含气泡缓存、限长共享记忆、自定义 GIF 和诊断回执。模型请求会把当前会话摘录与共享概况交给 Codex 处理。正常使用不依赖 Computer Use、屏幕录制或全局 Hooks。
+
+## 伙伴截图
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/media/companion-dark.png" />
+  <img src="docs/media/companion-light.png" width="752" alt="ChimeBuddy 原生气泡与默认银白龙伙伴，正文贴近人物，气泡内没有关闭按钮" />
+</picture>
+
+原生 AppKit 视图截图，使用演示文案。截图按 GitHub 的浅色 / 深色外观切换；[浅色原图](docs/media/companion-light.png) · [深色原图](docs/media/companion-dark.png)。
+
+## 常见问题
+
+<details>
+<summary>打开后看不到伙伴？</summary>
+
+确认程序仍在菜单栏运行，没有被手动隐藏；然后回到 Codex 的本机会话页面。伙伴只在 Codex 前台、且能确认当前会话时显示。多个主窗口、远程会话或日志格式变化时可能无法识别，它不会猜测你在看哪个会话。
+
+源码目录可执行只读检查，不调用模型：
 
 ```sh
 bash scripts/check-current.sh
 ```
 
-显式重放当前会话最新的一条真实消息，测试模型和缓存链路（使用 Codex 用量，不向原聊天发消息）：
+</details>
+
+<details>
+<summary>发送了消息，但她没有说话？</summary>
+
+自动吐槽允许没槽点时安静；直接对话应有回复。检查 Codex 登录、可用用量、所选模型和网络。Mac 的静态 HTTP/HTTPS 系统代理会传给 Codex 子进程；PAC 和仅 SOCKS 的自动转换尚未实现。
+
+直接对话失败时，对话框显示错误，气泡保留上一次内容，不把连接状态说成角色台词。不要仅凭旧气泡判断这次请求已经成功。
+
+</details>
+
+<details>
+<summary>这是 OpenAI 官方插件吗？兼容所有 Codex 版本吗？</summary>
+
+不是。它是独立的原生 macOS 第三方原型，借助本机页面日志和 Codex App Server 识别会话。当前仅验证单主窗口、本机会话；日志格式受客户端版本影响，升级后可能需要适配。尚未完成多窗口、远程会话和其他 Mac 型号的兼容验收。
+
+</details>
+
+## 开发资料
+
+- [实现、兼容边界与数据来源](docs/implementation.md)
+- [验证记录](docs/verification/2026-11-09.md)
+- [图标设计与生成来源](docs/design/app-icon.md)
+
+重新导出原生截图与 GIF：
 
 ```sh
-bash scripts/check-current.sh --roast
+bash scripts/export-readme-media.sh
 ```
 
-检查脚本修改缓存后，重开伙伴即可读取它。日常自动触发不需要运行脚本。
-
-## 当前行为
-
-- 页面路由决定当前会话。用户消息、后台回复和内部临时任务都不能改变选择。
-- 切换时立即清除上一会话的气泡，恢复新会话自己的缓存；未生成过则只显示角色。点击切换本身不调用模型。
-- 只在当前会话的新用户消息、最终回复完成时自动调用模型。中间回复、工具输出、思考过程、历史补载和模拟事件不触发。
-- 同一回合的多条用户输入使用独立消息 item ID；完成事件使用 turn ID。重复读取、切回和重启不重复生成。
-- 对话上下文只包含当前会话最近最多 10 轮，Codex 对话和与伙伴的直接对话共用这个预算。一次用户输入计一轮，包含后续回复；每条最多 2000 字符，长消息保留开头和结尾。仅启动或切换时补载当前文件尾部最多 4 MiB；工具记录很多时实际能读到的轮数可能少于 10 轮。
-- 用户画像和项目概况跨所有会话共享，分别硬性限制为 400 字和合计 800 字，包含键名及换行。只提取用户明确表达的稳定偏好、背景、项目目标和约束，不从 AI 回复或伙伴吐槽推断画像。项目不是按会话单独存一份；共享内容不包含其他会话的对话原文。
-- 新增/修正的事实按键合并，超长时淘汰较旧的条目；较早事件的结果不能撤销同键的新事实。设置 → 共享记忆可以查看、修改和清空；编辑/清空会阻止已排队或在途请求把旧事实写回来。只读旧聊天不会自动提取记忆。
-- 在途结果属于发起请求的会话。离开后完成只存入原会话缓存，不能显示到新会话，也不能覆盖较新结果。尚未开始的旧会话请求取消。
-- 毒舌风格允许直接怼用户、骂 AI、适量粗口，针对具体槽点。提示词减少复述、强造比喻和强行挑错，通常 8—35 字；旁观触发允许不说话，直接对伙伴说话则必须回应。原有缓存保留，不会批量重写。
-- 等待或失败时保留已有吐槽；没有缓存就不显示气泡。状态、引导和错误只进诊断记录。
-- 气泡使用实际 NSTextFieldCell 测量换行高度，普通短句完整显示；超长内容使用细浮层滚动条，闲置时自动隐藏，并留出内侧空间避免遮字。气泡没有关闭按钮或按钮专用列，正文左右各留 10 点。完整模型正文写入缓存，不再按 60/100 字硬截断；提示词仍要求简短，发送给模型的上下文摘录仍受每条 2000 字限制。旧缓存中已经丢失的后半句无法恢复，后续新生成的回复会完整保留。
-- 伙伴仅在 Codex 前台且确认当前会话时显示。角色可拖动、点击收起/展开气泡；右键人物或气泡 → 隐藏伙伴，可从菜单栏“显示伙伴”恢复。
-- 右键人物或气泡 → 和她聊聊，才打开独立原生输入窗口。消息只发给伙伴，不写进 Codex；请求带有明确的说话者和对象。切换 Codex 会话会关闭旧对话框，不提供手动选择会话。与伙伴的对话只在内存窗口内保留，重启不加载历史；最近一条气泡缓存仍可恢复。
-- 菜单栏仅提供显示伙伴、隐藏伙伴、设置和退出。设置窗口提供形象预览、导入 GIF、恢复默认形象，以及吐槽模型和推理档位选择。没有暂停自动吐槽、手动选择会话、模式选择或点评按钮。
-- 默认角色有待机眨眼、思考和说话表情，显示时统一动作帧的人物中心、脚底基线和高度，避免切帧跳位；系统减少动态效果时静止。自定义 GIF 优先保留并按原文件播放。
-
-自动吐槽始终启用，旧版保存的暂停状态不再生效。一次用户输入和一次最终回复各可调用一次 Codex，使用本机已有 ChatGPT 登录和用量。调用在独立临时目录、只读沙箱、临时会话中执行，不续写原聊天、不复制凭据、不需要 API Key。未保存选择前使用 CLI 默认模型；在设置中选择后，使用保存的模型和推理档位，不继承当前聊天的模型设置。提示词要求不用工具；只读沙箱不等于文件读取完全禁用。
-
-伙伴通过原生 CFNetwork 接口读取 macOS 当前启用的 HTTP/HTTPS 系统代理，传入它启动的 Codex 子进程。显式代理环境变量（包含空值禁用）、`ALL_PROXY` 和 `NO_PROXY` 优先保留，不修改系统代理或 Codex 配置。这样从 Finder/桌面启动伙伴时，也能使用 Mac 已配置的代理；没有启用静态 HTTP/HTTPS 代理时沿用原进程环境。本次未实现 PAC 脚本解析或仅 SOCKS 的自动转换。
-
-## 模型设置
-
-打开菜单栏 → 设置。模型列表和每个模型的推理档位通过本机 Codex 的 `model/list` 读取，包含分页；不硬编码模型名单或允许的档位组合。每次打开设置都会读取，也可点击刷新。只显示接口返回的非隐藏文本模型。
-
-选择模型时采用该模型返回的默认档位，档位列表随模型联动。更改自动保存，下次吐槽请求使用 `--model` 和 `model_reasoning_effort` 覆盖；在途请求和已有吐槽缓存保留。偏好只保存在 ChimeBuddy 自己的 macOS 偏好域，不改 Codex 全局配置或聊天的模型。
-
-首次读取失败时不能选择未知模型，保留刷新入口；刷新失败保留上次选项。已保存的模型不在当前列表中时提示重新选择，不静默替换模型；已有模型的原档位不再受支持时，改用该模型当前返回的默认档位并显示提示。模型列表来自 Codex 当前客户端目录，实际调用仍受登录、服务可用性和用量限制。
-
-## 观察来源与边界
-
-开发时验证的 Codex `26.1029.61003` 在桌面日志中输出页面路由，但不输出开源示例使用的窗口焦点字段。伙伴读取当前 Codex 主进程的 `IAB_LIFECYCLE received browser sidebar owner sync` 记录里的 `ownerRoutePath=/local/<UUID>`，再通过公开 `thread/read` 验证真实会话、读取名称及记录路径。这个日志名称来自宿主内部路由，伙伴界面仍是原生 NSPanel，不使用内置浏览器。
-
-消息来源是被选中会话的本地记录：`event_msg.item_completed.UserMessage` 和 `event_msg.task_complete.last_agent_message`。只接受这些白名单事件，不把原始模型输入、工具记录或 commentary 当用户对话。该路径覆盖其他本机项目，不需要给每个项目新增 Hooks。
-
-主观察路径不需要安装 Hooks。可选的项目级 `UserPromptSubmit` / `Stop` Hooks 仅作没有记录路径时的备用来源，同一会话只使用一种来源。个人 `.codex/hooks.json` 不随仓库分发；源码构建仅接受所在 checkout 的 Hook，分发安装包默认不接受 Hook。需要备用入口时，由调用方设置绝对目录 `CHIMEBUDDY_HOOK_WORKSPACE` 并执行 `ChimeBuddy --hook`。程序不安装全局 Hooks，也不替用户更改信任状态。
-
-日志和消息记录格式都是版本相关的兼容接口。Codex 升级后若无法确认会话，伙伴隐藏，不能退回“最近发过消息”的猜测。当前版本缺少焦点字段，因此同一进程出现多个主窗口路由时返回未知；多窗口跟随不在本次已验证范围。仅支持能通过本机 `thread/read` 返回记录路径的会话；远程会话没有验证。
-
-窗口使用 `nonactivatingPanel`、`canJoinAllSpaces`、`fullScreenAuxiliary` 和 `canJoinAllApplications`。用户此前已确认全屏可见；本次保留这些配置，多屏和全屏组合仍需人工验收。
-
-## 本地数据
-
-目录：`~/Library/Application Support/ChimeBuddy/`。
-
-- `reviews.json`：按会话独立保存最近吐槽、来源事件 ID 和时间，原子写入；旧结果不能覆盖新结果。失败不覆盖缓存。
-- `shared-memory.json`：跨会话共享的限长画像与项目概况；仅供 ChimeBuddy 使用，不写入 Codex 自身的记忆文件。权限为 `600`，原子写入。没有对话档案或用户原话字段。
-- `avatar.gif`：导入的 GIF，不超过 20 MB。
-- `receipts.jsonl`：页面切换、缓存恢复及请求开始/结束的诊断记录，不含对话正文或模型请求内容。
-- `events/`：原项目 Hooks 的临时投递箱。伙伴运行时每次轮询都会清理已解码的投递；主消息来源可用时不将它们合并进上下文。伙伴未运行时的待投递消息仍可能暂存在这里；它们不作为长期记忆。
-- `last-hook-invocation.json`：原 Hook 入口的时间和字节数，不保存被拒绝的正文。
-
-退出用菜单栏的“退出 ChimeBuddy”。停用原项目 Hooks 可在 Codex 设置中禁用这两项，或移除 `.codex/hooks.json`。这不会删除本地缓存。
-
-## 验证与参考
-
-模型接口参考 [Codex App Server](https://learn.chatgpt.com/docs/app-server)。
-
-最新验证见 [2026-11-07 验证记录](docs/verification/2026-11-07.md)。之前的模型、动画和语音验证见 [2026-11-06](docs/verification/2026-11-06.md)，历史原型验收在 [2026-11-05](docs/verification/2026-11-05.md)。
-
-显式测试真实模型的共享事实与回怼链路：`bash scripts/probe-buddy.sh`。使用当前模型和用量，数据写入独立临时目录，退出后删除，不向 Codex 聊天发送测试消息，也不向实际共享记忆写入测试画像。模型调用失败时返回非零状态，不把失败记成通过。
-
-会话选择思路参考 [CoPets selection.rs](https://github.com/ReiSuzunami/CoPets/blob/main/src-tauri/src/observer/selection.rs) 和 [streamdeckcodex desktop-active.ts](https://github.com/twidtwid/streamdeckcodex/blob/main/src/lib/desktop-active.ts)。本项目实现为独立 Swift 适配器，没有导入它们的源文件或美术素材。它们的 IPC 控制、Tauri 界面与 CDP 桥接没有引入。
+会话选择思路参考 [CoPets](https://github.com/ReiSuzunami/CoPets/blob/main/src-tauri/src/observer/selection.rs) 与 [streamdeckcodex](https://github.com/twidtwid/streamdeckcodex/blob/main/src/lib/desktop-active.ts)。没有引入它们的源代码或美术素材。

@@ -3,8 +3,14 @@ import Foundation
 import UniformTypeIdentifiers
 
 let workspace = HookWorkspace.resolve(bundleURL: Bundle.main.bundleURL, environment: ProcessInfo.processInfo.environment)
-let storage = FileManager.default.homeDirectoryForCurrentUser
-    .appendingPathComponent("Library/Application Support/ChimeBuddy")
+let exportingReadme = CommandLine.arguments.contains("--export-readme")
+if let index = CommandLine.arguments.firstIndex(of: "--export-readme"), CommandLine.arguments.count <= index + 1 {
+    fputs("Usage: ChimeBuddy --export-readme <output-directory>\n", stderr)
+    exit(2)
+}
+let storage = exportingReadme
+    ? FileManager.default.temporaryDirectory.appendingPathComponent("ChimeBuddyReadme-" + UUID().uuidString)
+    : FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/ChimeBuddy")
 let inbox = storage.appendingPathComponent("events")
 try FileManager.default.createDirectory(at: inbox, withIntermediateDirectories: true,
                                       attributes: [.posixPermissions: 0o700])
@@ -87,10 +93,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var metadataRetryAt = Date.distantPast
     var transcript: SessionTranscript?
     var liveSince = Date()
-    var visualPreview: Bool { CommandLine.arguments.contains("--preview-light") || CommandLine.arguments.contains("--preview-dark") }
+    var mediaExportURL: URL? {
+        guard let index = CommandLine.arguments.firstIndex(of: "--export-readme"), CommandLine.arguments.count > index + 1 else { return nil }
+        return URL(fileURLWithPath: CommandLine.arguments[index + 1], isDirectory: true)
+    }
+    var visualPreview: Bool { mediaExportURL != nil || CommandLine.arguments.contains("--preview-light") || CommandLine.arguments.contains("--preview-dark") }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        NSApp.setActivationPolicy(mediaExportURL == nil ? .accessory : .prohibited)
         panel = BuddyPanel(contentRect: NSRect(x: 0, y: 0, width: 440, height: 282),
                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.title = "ChimeBuddy"
@@ -138,20 +148,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let screen = NSScreen.main {
             panel.setFrameOrigin(NSPoint(x: screen.visibleFrame.maxX - 465, y: screen.visibleFrame.minY + 70))
         }
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "bubble.left.and.text.bubble.right", accessibilityDescription: "ChimeBuddy")
-        statusItem.button?.toolTip = "ChimeBuddy · 当前会话吐槽"
-        let menu = NSMenu()
-        menu.addItem(withTitle: "显示伙伴", action: #selector(showPanel), keyEquivalent: "")
-        menu.addItem(withTitle: "隐藏伙伴", action: #selector(hidePanel), keyEquivalent: "")
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(withTitle: "设置…", action: #selector(showSettings), keyEquivalent: ",")
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(withTitle: "退出 ChimeBuddy", action: #selector(quit), keyEquivalent: "q")
-        for item in menu.items { item.target = self }
-        statusItem.menu = menu
+        if mediaExportURL == nil {
+            statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+            statusItem.button?.image = NSImage(systemSymbolName: "bubble.left.and.text.bubble.right", accessibilityDescription: "ChimeBuddy")
+            statusItem.button?.toolTip = "ChimeBuddy · 当前会话吐槽"
+            let menu = NSMenu()
+            menu.addItem(withTitle: "显示伙伴", action: #selector(showPanel), keyEquivalent: "")
+            menu.addItem(withTitle: "隐藏伙伴", action: #selector(hidePanel), keyEquivalent: "")
+            menu.addItem(NSMenuItem.separator())
+            menu.addItem(withTitle: "设置…", action: #selector(showSettings), keyEquivalent: ",")
+            menu.addItem(NSMenuItem.separator())
+            menu.addItem(withTitle: "退出 ChimeBuddy", action: #selector(quit), keyEquivalent: "q")
+            for item in menu.items { item.target = self }
+            statusItem.menu = menu
+        }
         render()
         if visualPreview {
+            if let directory = mediaExportURL {
+                do {
+                    try ReadmeMediaExporter.export(to: directory, surface: buddySurface) { theme, text, visible, sprite in
+                        self.panel.appearance = NSAppearance(named: theme)
+                        self.messageLabel.stringValue = text
+                        self.setSpeechVisible(visible)
+                        self.layoutSpeech()
+                        self.avatar.image = sprite
+                    }
+                    try? FileManager.default.removeItem(at: storage)
+                    exit(0)
+                } catch {
+                    try? FileManager.default.removeItem(at: storage)
+                    fputs("\(error.localizedDescription)\n", stderr); exit(1)
+                }
+            }
             panel.appearance = NSAppearance(named: CommandLine.arguments.contains("--preview-light") ? .aqua : .darkAqua)
             messageLabel.stringValue = "说好养只桌宠，结果先给她安排了会话隔离和缓存管理。"
             if CommandLine.arguments.contains("--preview-long") {
@@ -414,6 +442,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func showPanel() { hiddenByUser = false; presentPanel() }
     func presentPanel() {
         layoutSpeech()
+        guard mediaExportURL == nil else { return }
         let codexIsFrontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.openai.codex"
         if !hiddenByUser && ((codexIsFrontmost && state.sessions.selectedID != nil) || visualPreview) { panel.orderFrontRegardless() }
         else { panel.orderOut(nil) }
@@ -434,7 +463,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     func loadAvatar() {
         let custom = storage.appendingPathComponent("avatar.gif")
-        if let image = NSImage(contentsOf: custom) {
+        if mediaExportURL == nil, let image = NSImage(contentsOf: custom) {
             avatar.loadCustom(image)
         } else if let url = Bundle.main.url(forResource: "codex-companion-atlas", withExtension: "png") {
             avatar.loadDefault(at: url)
