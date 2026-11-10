@@ -1,114 +1,90 @@
 import AppKit
 
-final class SettingsWindowController: NSWindowController {
-    private let preview = NSImageView()
-    private let nameLabel = NSTextField(labelWithString: "")
-    private let resetButton = NSButton()
+/// Codex-like utility settings: quiet sidebar, monochrome line symbols,
+/// one content column, native controls, and scrollable detail panes.
+final class SettingsWindowController: NSWindowController, NSWindowDelegate {
+    let actionPage: ActionSettingsView
+    let voicePage: VoiceSettingsView
+    private let root = SettingsCanvas()
+    private let sidebar = SettingsCanvas()
+    private let scroll = NSScrollView()
+    private let modelPage = SettingsCanvas()
     private let modelPicker = NSPopUpButton()
     private let effortPicker = NSPopUpButton()
     private let refreshButton = NSButton()
     private let modelHint = NSTextField(wrappingLabelWithString: "")
     private var models: [CodexModel] = []
     private var loading = false
-    var onImport: (() -> Void)?
-    var onReset: (() -> Void)?
+    private var navigation: [NSButton] = []
+    var onImport: (() -> Void)? { didSet { actionPage.onImport = onImport } }
+    var onReset: (() -> Void)? { didSet { actionPage.onReset = onReset } }
     var onMemory: (() -> Void)?
+    var onChange: (() -> Void)? {
+        didSet { actionPage.onChange = onChange; voicePage.onChange = onChange }
+    }
 
-    init() {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 380, height: 500),
-                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
+    init(actions: ActionLibrary, voice: VoicePreferences, preview: Bool = false) {
+        actionPage = ActionSettingsView(library: actions)
+        voicePage = VoiceSettingsView(preferences: voice, readCredentials: !preview)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 780, height: 720),
+                              styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
         window.title = "ChimeBuddy 设置"
+        window.titlebarAppearsTransparent = true
         window.isReleasedWhenClosed = false
         super.init(window: window)
-        let content = window.contentView!
-        let heading = NSTextField(labelWithString: "伙伴形象")
-        heading.font = .systemFont(ofSize: 15, weight: .semibold)
-        heading.frame = NSRect(x: 24, y: 453, width: 332, height: 23)
-        content.addSubview(heading)
-        preview.frame = NSRect(x: 22, y: 264, width: 136, height: 180)
-        preview.imageScaling = .scaleProportionallyUpOrDown
-        preview.setAccessibilityLabel("伙伴形象预览")
-        content.addSubview(preview)
-        nameLabel.frame = NSRect(x: 178, y: 410, width: 178, height: 20)
-        nameLabel.font = .systemFont(ofSize: 13, weight: .medium)
-        content.addSubview(nameLabel)
-        let description = NSTextField(wrappingLabelWithString: "选择你喜欢的 GIF，让她动起来。")
-        description.font = .systemFont(ofSize: 12)
-        description.textColor = .secondaryLabelColor
-        description.frame = NSRect(x: 178, y: 359, width: 178, height: 39)
-        content.addSubview(description)
-        let importButton = NSButton(title: "导入 GIF 形象…", target: self, action: #selector(importAvatar))
-        importButton.bezelStyle = .rounded
-        importButton.frame = NSRect(x: 174, y: 311, width: 186, height: 32)
-        content.addSubview(importButton)
-        resetButton.title = "恢复默认形象"
-        resetButton.target = self
-        resetButton.action = #selector(resetAvatar)
-        resetButton.bezelStyle = .rounded
-        resetButton.frame = NSRect(x: 174, y: 272, width: 186, height: 32)
-        content.addSubview(resetButton)
-        let hint = NSTextField(labelWithString: "GIF · 最大 20 MB")
-        hint.font = .systemFont(ofSize: 11)
-        hint.textColor = .secondaryLabelColor
-        hint.frame = NSRect(x: 24, y: 237, width: 332, height: 17)
-        content.addSubview(hint)
-        let divider = NSBox(frame: NSRect(x: 24, y: 218, width: 332, height: 1))
-        divider.boxType = .separator
-        content.addSubview(divider)
-        let modelHeading = NSTextField(labelWithString: "吐槽模型")
-        modelHeading.font = heading.font
-        modelHeading.frame = NSRect(x: 24, y: 180, width: 332, height: 23)
-        content.addSubview(modelHeading)
-        for (title, y) in [("模型", 143.0), ("推理档位", 101.0)] {
-            let label = NSTextField(labelWithString: title)
-            label.frame = NSRect(x: 24, y: y, width: 76, height: 20)
-            content.addSubview(label)
+        window.delegate = self
+        root.frame = window.contentView!.bounds; window.contentView = root
+        sidebar.frame = NSRect(x: 0, y: 0, width: 184, height: 720); sidebar.sidebar = true; root.addSubview(sidebar)
+        SettingsStyle.label("设置", in: sidebar, x: 18, y: 22, width: 150, size: 13, secondary: true, weight: .medium)
+        for (index, item) in [("形象与动作", "face.smiling"), ("声音", "waveform"), ("模型与记忆", "slider.horizontal.3")].enumerated() {
+            let button = SettingsNavigationButton(title: item.0, target: self, action: #selector(navigate(_:)))
+            button.image = NSImage(systemSymbolName: item.1, accessibilityDescription: nil)
+            button.imagePosition = .imageLeading; button.image?.isTemplate = true
+            button.isBordered = false; button.setButtonType(.momentaryChange)
+            button.alignment = .left; button.font = .systemFont(ofSize: 13)
+            button.frame = NSRect(x: 12, y: 64 + CGFloat(index) * 42, width: 160, height: 34)
+            button.tag = index; button.setAccessibilityLabel(item.0)
+            sidebar.addSubview(button); navigation.append(button)
         }
-        modelPicker.frame = NSRect(x: 100, y: 138, width: 256, height: 28)
-        modelPicker.setAccessibilityLabel("吐槽模型")
-        modelPicker.target = self
-        modelPicker.action = #selector(selectModel)
-        content.addSubview(modelPicker)
-        effortPicker.frame = NSRect(x: 100, y: 96, width: 256, height: 28)
-        effortPicker.setAccessibilityLabel("推理档位")
-        effortPicker.target = self
-        effortPicker.action = #selector(selectEffort)
-        content.addSubview(effortPicker)
-        refreshButton.title = "刷新"
-        refreshButton.bezelStyle = .rounded
-        refreshButton.frame = NSRect(x: 290, y: 50, width: 70, height: 28)
-        refreshButton.target = self
-        refreshButton.action = #selector(loadModels)
-        content.addSubview(refreshButton)
-        let memoryButton = NSButton(title: "共享记忆…", target: self, action: #selector(openMemory))
-        memoryButton.bezelStyle = .rounded
-        memoryButton.frame = NSRect(x: 178, y: 50, width: 108, height: 28)
-        content.addSubview(memoryButton)
-        modelHint.font = .systemFont(ofSize: 11)
-        modelHint.textColor = .secondaryLabelColor
-        modelHint.frame = NSRect(x: 24, y: 10, width: 332, height: 34)
-        content.addSubview(modelHint)
-        window.center()
+        SettingsStyle.label("ChimeBuddy", in: sidebar, x: 18, y: 665, width: 150, size: 11, secondary: true)
+        scroll.frame = NSRect(x: 184, y: 0, width: 596, height: 720)
+        scroll.drawsBackground = false; scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.scrollerStyle = .overlay
+        root.addSubview(scroll)
+        buildModelPage()
+        selectPage(0); window.center()
     }
-
     required init?(coder: NSCoder) { nil }
-
-    func update(customURL: URL) {
-        if let image = NSImage(contentsOf: customURL), image.isValid {
-            preview.image = image
-            nameLabel.stringValue = "自定义 GIF"
-            resetButton.isEnabled = true
-        } else {
-            preview.image = Bundle.main.url(forResource: "codex-companion", withExtension: "png").flatMap { NSImage(contentsOf: $0) }
-            nameLabel.stringValue = "默认 Codex 伙伴"
-            resetButton.isEnabled = false
-        }
-        preview.animates = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    func update(customURL: URL) { actionPage.update(customURL: customURL) }
+    func setVoiceStatus(_ value: String) { voicePage.setStatus(value) }
+    func windowWillClose(_ notification: Notification) { voicePage.stop() }
+    func selectPage(_ index: Int) {
+        voicePage.stop()
+        for button in navigation { button.state = button.tag == index ? .on : .off; button.needsDisplay = true }
+        scroll.documentView = index == 0 ? actionPage : index == 1 ? voicePage : modelPage
+        scroll.contentView.scroll(to: .zero); scroll.reflectScrolledClipView(scroll.contentView)
     }
-
-    @objc private func importAvatar() { onImport?() }
-    @objc private func resetAvatar() { onReset?() }
+    @objc private func navigate(_ sender: NSButton) { selectPage(sender.tag) }
     @objc private func openMemory() { onMemory?() }
+    private func buildModelPage() {
+        modelPage.frame = NSRect(x: 0, y: 0, width: 596, height: 654)
+        SettingsStyle.heading("模型与记忆", subtitle: "回复模型复用 Codex 登录。可用模型和推理档位从 Codex 实时读取。", in: modelPage)
+        SettingsStyle.label("模型", in: modelPage, y: 124, width: 110)
+        modelPicker.frame = NSRect(x: 142, y: 116, width: 430, height: 30)
+        modelPicker.target = self; modelPicker.action = #selector(selectModel); modelPicker.setAccessibilityLabel("吐槽模型"); modelPage.addSubview(modelPicker)
+        SettingsStyle.label("推理档位", in: modelPage, y: 172, width: 110)
+        effortPicker.frame = NSRect(x: 142, y: 164, width: 430, height: 30)
+        effortPicker.target = self; effortPicker.action = #selector(selectEffort); effortPicker.setAccessibilityLabel("推理档位"); modelPage.addSubview(effortPicker)
+        refreshButton.title = "刷新选项"; refreshButton.bezelStyle = .rounded
+        refreshButton.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: nil); refreshButton.imagePosition = .imageLeading
+        refreshButton.target = self; refreshButton.action = #selector(loadModels)
+        refreshButton.frame = NSRect(x: 440, y: 210, width: 132, height: 32); modelPage.addSubview(refreshButton)
+        modelHint.font = .systemFont(ofSize: 12); modelHint.textColor = .secondaryLabelColor
+        modelHint.frame = NSRect(x: 28, y: 262, width: 540, height: 42); modelPage.addSubview(modelHint)
+        SettingsStyle.divider(in: modelPage, y: 326)
+        SettingsStyle.label("共享记忆", in: modelPage, y: 352, weight: .semibold)
+        SettingsStyle.label("不同会话共享简短画像和项目概况；聊天记录各自隔离。\n画像最多 400 字，全部项目记忆合计最多 800 字。", in: modelPage, y: 389, size: 12, secondary: true, height: 45)
+        SettingsStyle.button("查看与编辑", symbol: "square.and.pencil", in: modelPage, x: 24, y: 453, width: 144, target: self, action: #selector(openMemory))
+    }
 
     @objc func loadModels() {
         guard !loading else { return }

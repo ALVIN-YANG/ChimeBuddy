@@ -24,3 +24,15 @@ swiftc -swift-version 5 Sources/SpeechBubbleLayout.swift Tests/SpeechBubbleLayou
 .build/speech-layout-tests
 swiftc -swift-version 5 Sources/AvatarFrameRegistration.swift Tests/AvatarFrameRegistrationTests.swift -framework AppKit -o .build/avatar-registration-tests
 .build/avatar-registration-tests
+
+swiftc -swift-version 5 Sources/ActionLibrary.swift Sources/VoicePreferences.swift Sources/TTSRequest.swift Sources/TTSStreamDecoder.swift Sources/PCMStreamPlayer.swift Tests/VoiceTests.swift -framework AppKit -o .build/voice-tests
+.build/voice-tests
+swiftc -swift-version 5 Sources/ActionLibrary.swift Tests/ActionLibraryTests.swift -framework AppKit -o .build/action-library-tests
+.build/action-library-tests
+
+settings_sources=()
+for source in Sources/*.swift; do
+    if [[ "$source" != "Sources/main.swift" ]]; then settings_sources+=("$source"); fi
+done
+swiftc -swift-version 5 "${settings_sources[@]}" Tests/SettingsFlowTests.swift -framework AppKit -o .build/settings-flow-tests
+.build/settings-flow-tests

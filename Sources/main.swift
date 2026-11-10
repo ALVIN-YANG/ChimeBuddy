@@ -3,7 +3,7 @@ import Foundation
 import UniformTypeIdentifiers
 
 let workspace = HookWorkspace.resolve(bundleURL: Bundle.main.bundleURL, environment: ProcessInfo.processInfo.environment)
-let exportingReadme = CommandLine.arguments.contains("--export-readme")
+let exportingReadme = CommandLine.arguments.contains("--export-readme") || CommandLine.arguments.contains("--export-settings")
 if let index = CommandLine.arguments.firstIndex(of: "--export-readme"), CommandLine.arguments.count <= index + 1 {
     fputs("Usage: ChimeBuddy --export-readme <output-directory>\n", stderr)
     exit(2)
@@ -14,6 +14,20 @@ let storage = exportingReadme
 let inbox = storage.appendingPathComponent("events")
 try FileManager.default.createDirectory(at: inbox, withIntermediateDirectories: true,
                                       attributes: [.posixPermissions: 0o700])
+
+if CommandLine.arguments.contains("--probe-voice") {
+    do { try VoiceProbe.run(storage: storage); exit(0) }
+    catch { fputs("\(error.localizedDescription)\n", stderr); exit(1) }
+}
+if CommandLine.arguments.contains("--check-voice-config") {
+    do {
+        let preferences = VoicePreferences(directory: storage)
+        let provider = preferences.value.provider
+        _ = try TTSRequest.build(provider: provider, configuration: preferences.configuration(for: provider), secrets: VoiceKeychain.load(provider), text: "配置检查")
+        print("Saved voice configuration and Keychain readable: \(provider.title), \(preferences.configuration(for: provider).model)")
+        exit(0)
+    } catch { fputs("\(error.localizedDescription)\n", stderr); exit(1) }
+}
 
 // This executable also acts as the short-lived hook. It never calls a model or
 // writes instructions back into the Codex conversation.
@@ -70,6 +84,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var settingsController: SettingsWindowController?
     var dialogueController: BuddyDialogueWindow?
     var memoryController: MemoryWindowController?
+    let actionLibrary = ActionLibrary(directory: storage)
+    let voicePreferences = VoicePreferences(directory: storage)
+    lazy var performance: CompanionPerformance = {
+        let value = CompanionPerformance(avatar: avatar, library: actionLibrary, preferences: voicePreferences)
+        value.restoreAvatar = { [weak self] in self?.loadAvatar() }
+        value.onVoiceError = { [weak self] message in self?.settingsController?.setVoiceStatus(message) }
+        value.voice.onMetrics = { [weak self] values in self?.writeReceipt(values) }
+        return value
+    }()
     var hiddenByUser = false
     var collapsedByUser = false
     let state = RoastState(cache: SessionReviews(directory: storage))
@@ -100,6 +123,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var visualPreview: Bool { mediaExportURL != nil || CommandLine.arguments.contains("--preview-light") || CommandLine.arguments.contains("--preview-dark") }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if let index = CommandLine.arguments.firstIndex(of: "--export-settings") {
+            guard CommandLine.arguments.count > index + 1 else { fputs("Usage: ChimeBuddy --export-settings <directory>\n", stderr); exit(2) }
+            NSApp.setActivationPolicy(.prohibited)
+            do {
+                try SettingsMediaExporter.export(to: URL(fileURLWithPath: CommandLine.arguments[index + 1]), storage: storage)
+                try? FileManager.default.removeItem(at: storage); exit(0)
+            } catch { try? FileManager.default.removeItem(at: storage); fputs("\(error.localizedDescription)\n", stderr); exit(1) }
+        }
         NSApp.setActivationPolicy(mediaExportURL == nil ? .accessory : .prohibited)
         panel = BuddyPanel(contentRect: NSRect(x: 0, y: 0, width: 440, height: 282),
                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -232,6 +263,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let changed = lastPage?.sessionID != page?.sessionID || lastPage?.windowID != page?.windowID || (lastPage == nil) != (page == nil)
         lastPage = page
         if changed {
+            performance.cancel()
             candidateID = page?.sessionID
             liveSince = max(launchedAt, page?.timestamp ?? Date())
             selectionGeneration = UUID()
@@ -311,8 +343,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func schedule(_ request: RoastRequest) {
+        performance.cancel()
         avatar.setMood(.thinking)
         let memoryGeneration = memory.editGeneration
+        let actions = Dictionary(uniqueKeysWithValues: actionLibrary.available.map { ($0.tag, $0.meaning) })
         writeReceipt(["state": "roastQueued", "contextSession": request.event.session, "eventKey": request.key, "kind": request.event.kind])
         reviews.addOperation { [weak self] in
             guard let self = self else { return }
@@ -324,7 +358,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.writeReceipt(["state": "roastStarted", "contextSession": request.event.session, "eventKey": request.key, "kind": request.event.kind,
                                    "model": selection?.model ?? "default", "reasoningEffort": selection?.effort ?? "default"])
             }
-            let result = Result { try CodexReviewer.respond(context: request.context, direct: request.direct, memory: memorySnapshot, selection: selection) }
+            let result = Result { try CodexReviewer.respond(context: request.context, direct: request.direct, memory: memorySnapshot, selection: selection, actions: actions) }
             DispatchQueue.main.async {
                 var displayed = false
                 switch result {
@@ -333,10 +367,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         // Assistant output never authorizes a memory extraction.
                         do { try self.memory.apply(answer, source: request.event, generation: memoryGeneration) }
                         catch { self.writeReceipt(["state": "memorySaveFailed"]) }
-                        try self.state.complete(request, text: answer.text)
+                        try self.state.complete(request, text: answer.text, action: answer.action)
                         if self.state.canPresent(request) {
                             self.render()
-                            if !answer.text.isEmpty { self.avatar.setMood(.speaking); displayed = true }
+                            if !answer.text.isEmpty {
+                                if self.panel.isVisible || (request.direct && self.dialogueController?.window?.isKeyWindow == true) {
+                                    self.performance.play(text: answer.text, action: answer.action)
+                                }
+                                displayed = true
+                            }
                         }
                         self.updateDialogue()
                         if request.direct, self.dialogueController?.sessionID == request.event.session { self.dialogueController?.finish(requestKey: request.key) }
@@ -394,11 +433,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         writeReceipt(["state": collapsedByUser ? "speechCollapsed" : "speechExpanded"])
     }
     @objc func showSettings() {
+        performance.cancel()
         if settingsController == nil {
-            let controller = SettingsWindowController()
+            let controller = SettingsWindowController(actions: actionLibrary, voice: voicePreferences)
             controller.onImport = { [weak self] in self?.importAvatar() }
             controller.onReset = { [weak self] in self?.resetAvatar() }
             controller.onMemory = { [weak self] in self?.showMemory() }
+            controller.onChange = { [weak self] in self?.performance.cancel() }
             settingsController = controller
         }
         settingsController?.update(customURL: storage.appendingPathComponent("avatar.gif"))
@@ -438,14 +479,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let id = dialogueController?.sessionID, state.sessions.selectedID == id else { return }
         dialogueController?.update(messages: state.buddyMessages(sessionID: id), cached: state.text)
     }
-    @objc func hidePanel() { hiddenByUser = true; panel.orderOut(nil) }
+    @objc func hidePanel() { hiddenByUser = true; performance.cancel(); panel.orderOut(nil) }
     @objc func showPanel() { hiddenByUser = false; presentPanel() }
     func presentPanel() {
         layoutSpeech()
         guard mediaExportURL == nil else { return }
         let codexIsFrontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.openai.codex"
         if !hiddenByUser && ((codexIsFrontmost && state.sessions.selectedID != nil) || visualPreview) { panel.orderFrontRegardless() }
-        else { panel.orderOut(nil) }
+        else {
+            panel.orderOut(nil)
+            let replyingToBuddy = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == Bundle.main.bundleIdentifier
+                && dialogueController?.window?.isKeyWindow == true && dialogueController?.sessionID == state.sessions.selectedID
+            if !replyingToBuddy { performance.cancel() }
+        }
     }
     func writeReceipt(_ values: [String: Any]) {
         var record = values

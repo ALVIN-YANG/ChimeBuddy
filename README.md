@@ -4,7 +4,7 @@
 <h1 align="center">ChimeBuddy</h1>
 <p align="center">跟着当前会话走的 macOS 桌面伙伴。会吐槽，也能和你聊。</p>
 <p align="center">
-  <a href="https://github.com/ALVIN-YANG/ChimeBuddy/releases/tag/v0.1.2">下载原型</a> ·
+  <a href="https://github.com/ALVIN-YANG/ChimeBuddy/releases/tag/v0.2.0">下载原型</a> ·
   <a href="#安装">安装</a> ·
   <a href="#使用">使用</a> ·
   <a href="https://blog.mlxb.cc/projects/#chimebuddy">个人作品</a>
@@ -23,7 +23,8 @@ ChimeBuddy 悬浮在 Codex 旁边，根据当前会话的用户输入和 AI 最�
 
 - **跟随会话**：只点评当前会话，后台回复不会把伙伴切走。
 - **有来有回**：自动吐槽，也能直接聊天；气泡平时只放正文。
-- **可以换形象**：内置四种表情，也可以导入自己的 GIF。
+- **可以换形象与动作**：导入自己的 GIF，按 AI 返回的动作标签播放，不限标签数量。
+- **可以出声**：自定义流式 TTS，支持试听、停止和选择声音输出设备。
 - **可以选模型**：从 Codex 读取可用模型和推理档位，使用本机登录。
 - **上下文分清楚**：会话原话隔离，跨会话只共享限长概况。
 
@@ -37,10 +38,10 @@ ChimeBuddy 悬浮在 Codex 旁边，根据当前会话的用户输入和 AI 最�
 
 ### 下载运行
 
-1. 打开 [v0.1.2 Releases](https://github.com/ALVIN-YANG/ChimeBuddy/releases/tag/v0.1.2)，下载 `ChimeBuddy-v0.1.2-macos-arm64.zip`。
+1. 打开 [v0.2.0 Releases](https://github.com/ALVIN-YANG/ChimeBuddy/releases/tag/v0.2.0)，下载 `ChimeBuddy-v0.2.0-macos-arm64.zip`。
 2. 解压，把 `ChimeBuddy.app` 拖到“应用程序”目录，然后打开。
 3. 在 Codex 打开一个本机会话，保持 Codex 在前台。没有吐槽缓存时，先显示人物；发送一条新消息后才会请求新的吐槽。
-4. 在 macOS 顶部菜单栏找到双气泡图标，打开“设置…”选择模型，或导入自己的 GIF。
+4. 在 macOS 顶部菜单栏找到双气泡图标，打开“设置…”选择模型、导入 GIF，或配置流式 TTS。
 
 这是**未公证、仅 ad-hoc 签名的第三方原型**。如果 macOS 阻止打开，确认来源后可在“系统设置 → 隐私与安全性”检查是否提供“仍要打开”；详见 [Apple 的说明](https://support.apple.com/zh-cn/102445)。也可以使用下方的源码构建方式。
 
@@ -69,7 +70,7 @@ bash scripts/build.sh
 open .build/ChimeBuddy.app
 ```
 
-构建不需要 Electron、Node.js 或单独配置 API Key。只在重新导出 README GIF 时需要 `ffmpeg`。
+构建不需要 Electron 或 Node.js。文字回复使用 Codex 登录；可选的流式 TTS 需要自己的服务商 Key。只在重新导出 README GIF 时需要 `ffmpeg`。
 
 </details>
 
@@ -77,7 +78,8 @@ open .build/ChimeBuddy.app
 
 | 想做什么 | 怎么操作 |
 | --- | --- |
-| 自动听她吐槽 | 在当前 Codex 会话发送消息，或等 AI 最终回复完成 |
+| 自动吐槽 | 在当前 Codex 会话发送消息，或等 AI 最终回复完成 |
+| 朗读新的吐槽 | 设置 → 声音，配置 TTS 并开启自动朗读 |
 | 直接和她聊天 | 右键人物或气泡 → **和她聊聊…** |
 | 收起 / 展开气泡 | 点击人物 |
 | 移动伙伴 | 拖动人物 |
@@ -91,9 +93,12 @@ open .build/ChimeBuddy.app
 
 从菜单栏双气泡图标打开“设置…”。
 
-- **形象**：导入不超过 20 MB 的 GIF，或恢复默认银白龙伙伴。
+- **形象与动作**：导入默认 GIF；新增、编辑、预览、删除动作标签和对应 GIF。AI 自动选动作，结束后恢复默认。
+- **声音**：ElevenLabs、OpenAI 兼容、Azure、MiniMax、火山豆包、CosyVoice 与自定义 HTTP 流。地址、模型、Voice ID 均可编辑；试听后保存，可自动朗读新回复。密钥保存在本机钥匙串。
 - **模型 / 推理档位**：读取 Codex 当前提供的选项，更改后从下一次请求生效；不会修改 Codex 原聊天的模型。
 - **共享记忆**：查看、修改、清空用户画像和项目概况。画像最多 **400 字**，全部项目概况合计最多 **800 字**。
+
+完整配置方法、服务商差异及验证边界见 [声音与动作说明](docs/tts-and-actions.md)。ElevenLabs 已用真实账号和人耳验证；其他预设尚未完成真实账号验证。
 
 模型调用在独立的临时会话中进行，不往 Codex 原聊天发消息。使用已有的 [Codex 登录](https://learn.chatgpt.com/docs/auth)和用量；一次用户输入、一次 AI 最终回复各可触发一次调用，直接聊天也会调用模型。
 
@@ -101,7 +106,16 @@ open .build/ChimeBuddy.app
 
 当前会话的 Codex 对话与伙伴对话共用最近**最多 10 轮**的窗口。不同会话的原话不混用；稳定偏好和项目概况可以共享。伙伴对话不另存长期档案，每个会话只保留最后一条气泡缓存供恢复。
 
-本地数据位于 `~/Library/Application Support/ChimeBuddy/`，包含气泡缓存、限长共享记忆、自定义 GIF 和诊断回执。模型请求会把当前会话摘录与共享概况交给 Codex 处理。正常使用不依赖 Computer Use、屏幕录制或全局 Hooks。
+本地数据位于 `~/Library/Application Support/ChimeBuddy/`，包含气泡缓存、限长共享记忆、自定义 GIF、动作映射、声音偏好和诊断回执。凭据存入 macOS 钥匙串。模型请求会把当前会话摘录与共享概况交给 Codex 处理。正常使用不依赖 Computer Use、屏幕录制或全局 Hooks。
+
+## 设置界面
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/media/settings-voice-dark.png" />
+  <img src="docs/media/settings-voice-light.png" width="780" alt="ChimeBuddy 原生声音设置：自定义服务商、地址、模型、音色、输出设备，以及试听和保存按钮" />
+</picture>
+
+*原生设置视图，使用隔离的空配置导出，不包含用户密钥、声音偏好或设备名称。*
 
 ## 伙伴截图
 
@@ -153,6 +167,7 @@ bash scripts/check-current.sh
 
 ```sh
 bash scripts/export-readme-media.sh
+bash scripts/export-settings-media.sh
 ```
 
 会话选择思路参考 [CoPets](https://github.com/ReiSuzunami/CoPets/blob/main/src-tauri/src/observer/selection.rs) 与 [streamdeckcodex](https://github.com/twidtwid/streamdeckcodex/blob/main/src/lib/desktop-active.ts)。没有引入它们的源代码或美术素材。
