@@ -87,9 +87,10 @@ def main():
             if header[1] == "blob":
                 checked += 1
                 result.extend(findings(data, sha[:12] + ":" + name, known))
-            elif header[1] == "commit":
+            elif header[1] in {"commit", "tag"}:
+                result.extend(findings(data, sha[:12], known))
                 for line in data.splitlines():
-                    if line.startswith((b"author ", b"committer ")):
+                    if line.startswith((b"author ", b"committer ", b"tagger ")):
                         match = re.search(rb"<([^>]+)>", line)
                         if match and not match[1].endswith(b"@users.noreply.github.com"):
                             result.append({"category": "author-email", "location": sha[:12]})

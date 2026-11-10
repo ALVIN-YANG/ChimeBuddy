@@ -53,6 +53,14 @@ class PublicationChecksTests(unittest.TestCase):
             self.assertNotIn(base64.b64encode(opaque), package.stdout)
             self.assertEqual({v["category"] for v in json.loads(package.stdout)["findings"]}, {"private-file", "known-credential"})
 
+    def test_c2pa_provenance_is_not_a_chat_identifier(self):
+        image = SCRIPT.parent.parent / "Assets/codex-companion.png"
+        data = image.read_bytes()
+        self.assertTrue(checks.public_provenance_ranges(data))
+        self.assertFalse(checks.findings(data, "production-image"))
+        private_id = b"12345678" + b"-1234-4234-8234-123456789012"
+        self.assertTrue(checks.findings(data + private_id, "outside-provenance"))
+
 
 if __name__ == "__main__":
     unittest.main()
