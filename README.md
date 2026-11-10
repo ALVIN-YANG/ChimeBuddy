@@ -4,7 +4,7 @@
 <h1 align="center">ChimeBuddy</h1>
 <p align="center">跟着当前会话走的 macOS 桌面伙伴。会吐槽，也能和你聊。</p>
 <p align="center">
-  <a href="https://github.com/ALVIN-YANG/ChimeBuddy/releases/tag/v0.2.1">下载原型</a> ·
+  <a href="https://github.com/ALVIN-YANG/ChimeBuddy/releases/tag/v0.2.2">下载原型</a> ·
   <a href="#安装">安装</a> ·
   <a href="#使用">使用</a> ·
   <a href="https://blog.mlxb.cc/projects/#chimebuddy">个人作品</a>
@@ -38,12 +38,12 @@ ChimeBuddy 悬浮在 Codex 旁边，根据当前会话的用户输入和 AI 最�
 
 ### 下载运行
 
-1. 打开 [v0.2.1 Releases](https://github.com/ALVIN-YANG/ChimeBuddy/releases/tag/v0.2.1)，下载 `ChimeBuddy-v0.2.1-macos-arm64.zip`。
+1. 打开 [v0.2.2 Releases](https://github.com/ALVIN-YANG/ChimeBuddy/releases/tag/v0.2.2)，下载 `ChimeBuddy-v0.2.2-macos-arm64.zip`。
 2. 解压，把 `ChimeBuddy.app` 拖到“应用程序”目录，然后打开。
 3. 在 Codex 打开一个本机会话，保持 Codex 在前台。没有吐槽缓存时，先显示人物；发送一条新消息后才会请求新的吐槽。
 4. 在 macOS 顶部菜单栏找到双气泡图标，打开“设置…”选择模型、导入 GIF，或配置流式 TTS。
 
-这是**未公证、仅 ad-hoc 签名的第三方原型**。如果 macOS 阻止打开，确认来源后可在“系统设置 → 隐私与安全性”检查是否提供“仍要打开”；详见 [Apple 的说明](https://support.apple.com/zh-cn/102445)。也可以使用下方的源码构建方式。
+GitHub 的 v0.2.2 安装包已使用 **Developer ID 签名并通过 Apple 公证，票据已装订**。首次打开时按 macOS 的正常提示确认即可；若系统阻止打开，先确认下载版本和校验和，再参考 [Apple 的说明](https://support.apple.com/zh-cn/102445)。[签名、公证及核验方法](docs/distribution.md)。
 
 安装包附有 `SHA256SUMS.txt`。将它与 ZIP 放在同一目录后，可以校验下载：
 
@@ -70,7 +70,7 @@ bash scripts/build.sh
 open .build/ChimeBuddy.app
 ```
 
-构建不需要 Electron 或 Node.js。文字回复使用 Codex 登录；可选的流式 TTS 需要自己的服务商 Key。只在重新导出 README GIF 时需要 `ffmpeg`。
+构建不需要 Electron 或 Node.js。默认源码构建使用本机 ad-hoc 签名；正式分发方式见 [签名与公证](docs/distribution.md)。文字回复使用 Codex 登录；可选的流式 TTS 需要自己的服务商 Key。只在重新导出 README GIF 时需要 `ffmpeg`。
 
 </details>
 
@@ -163,6 +163,7 @@ bash scripts/check-current.sh
 - [最新验证记录](docs/verification/2026-11-10.md)
 - [图标设计与生成来源](docs/design/app-icon.md)
 - [发布前脱敏检查](docs/publication.md)
+- [Developer ID 签名、公证与分发](docs/distribution.md)
 
 重新导出原生截图与 GIF：
 
