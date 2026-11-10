@@ -2,3 +2,10 @@
 output/
 .DS_Store
 .codex/hooks.json
+__pycache__/
+.env
+.env.*
+*.p8
+*.p12
+*.pem
+*.key

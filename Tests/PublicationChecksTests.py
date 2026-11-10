@@ -61,6 +61,27 @@ class PublicationChecksTests(unittest.TestCase):
         private_id = b"12345678" + b"-1234-4234-8234-123456789012"
         self.assertTrue(checks.findings(data + private_id, "outside-provenance"))
 
+    def test_local_checkpoint_is_not_a_published_ref(self):
+        with tempfile.TemporaryDirectory() as directory:
+            def git(*args, data=None):
+                return subprocess.check_output(["git", "-C", directory, *args], input=data)
+            git("init", "-q")
+            git("config", "user.name", "Public fixture")
+            git("config", "user.email", "0+fixture@users.noreply.github.com")
+            Path(directory, "public.txt").write_text("public fixture")
+            git("add", "public.txt"); git("commit", "-qm", "fixture")
+            token = b"sk_" + b"q" * 32
+            blob = git("hash-object", "-w", "--stdin", data=token).strip()
+            tree = git("mktree", data=b"100644 blob " + blob + b"\tprivate.txt\n").strip().decode()
+            git("update-ref", "refs/codex/checkpoint", tree)
+            def scan():
+                return subprocess.run(["python3", str(SCRIPT), "--repo", directory, "--history", "--json"], capture_output=True)
+            self.assertEqual(scan().returncode, 0)
+            git("update-ref", "refs/tags/published-fixture", tree)
+            result = scan()
+            self.assertEqual(result.returncode, 1)
+            self.assertNotIn(token, result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

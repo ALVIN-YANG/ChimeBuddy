@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Read-only publication checks. Findings never print matched secret values.
 
-Default: tracked working files. --history: all reachable blobs and author
+Default: tracked working files. --history: branch/tag blobs and author
 metadata. --archive: ZIP contents. Optional exact secret is read from stdin.
 This is a scoped leak check, not a claim that arbitrary personal data is found.
 """
@@ -77,7 +77,9 @@ def main():
     result = []
     checked = 0
     if args.history:
-        objects = git(args.repo, "rev-list", "--objects", "--all").decode().splitlines()
+        # Publication covers branch and version-tag refs. Local Codex tree
+        # checkpoints and remote-tracking refs are not pushed by this workflow.
+        objects = git(args.repo, "rev-list", "--objects", "--branches", "--tags").decode().splitlines()
         process = subprocess.Popen(["git", "-C", str(args.repo), "cat-file", "--batch"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
         for row in objects:
             sha, _, name = row.partition(" ")
