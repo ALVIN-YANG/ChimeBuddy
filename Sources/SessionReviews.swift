@@ -6,6 +6,7 @@ struct SavedReview: Codable, Equatable {
     let eventID: String
     let eventDate: Date
     let text: String
+    var action: String? = nil
 }
 
 /// Results belong to the conversation that produced their context, including

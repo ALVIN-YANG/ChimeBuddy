@@ -20,8 +20,9 @@ import Foundation
         assert(state.receive(event("background-a", "A", 2, kind: "Stop"), live: true) == nil)
         let b = state.receive(event("b-user", "B", 3), live: true)!
         assert(!b.context.contains("A 的"), "Never mix conversations into a model request")
-        try state.complete(b, text: "B 的吐槽")
+        try state.complete(b, text: "B 的吐槽", action: "得意")
         assert(state.text == "B 的吐槽")
+        assert(SessionReviews(directory: directory).review(sessionID: "B", mode: "roast")?.action == "得意")
         try state.complete(a, text: "吐槽：A 的吐槽")
         assert(state.text == "B 的吐槽", "Late A completion must not overwrite B")
         state.sessions.select("A")

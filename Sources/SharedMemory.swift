@@ -10,6 +10,7 @@ struct BuddyAnswer: Codable {
     let text: String
     let profileUpdates: [MemoryFact]
     let projectUpdates: [MemoryFact]
+    var action: String? = nil
 }
 
 struct MemorySnapshot: Codable {

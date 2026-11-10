@@ -68,11 +68,11 @@ final class RoastState {
     func canStart(_ request: RoastRequest) -> Bool {
         sessions.selectedID == request.event.session
     }
-    func complete(_ request: RoastRequest, text: String) throws {
+    func complete(_ request: RoastRequest, text: String, action: String? = nil) throws {
         let value = Self.clean(text)
         guard !value.isEmpty else { return }
         try cache.save(SavedReview(sessionID: request.event.session, mode: "roast", eventID: request.key,
-                                   eventDate: request.event.receivedAt, text: value))
+                                   eventDate: request.event.receivedAt, text: value, action: action))
         let directStillInWindow = request.direct && canStart(request) && messages(sessionID: request.event.session).contains { $0.id == request.event.id }
         if canPresent(request) || directStillInWindow {
             dialogue[request.event.session, default: []].append(ContextMessage(id: "buddy:" + request.key, date: Date(), speaker: "buddy", audience: "user", text: value))
