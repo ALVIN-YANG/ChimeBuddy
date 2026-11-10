@@ -160,8 +160,9 @@ bash scripts/check-current.sh
 ## 开发资料
 
 - [实现、兼容边界与数据来源](docs/implementation.md)
-- [验证记录](docs/verification/2026-11-09.md)
+- [最新验证记录](docs/verification/2026-11-10.md)
 - [图标设计与生成来源](docs/design/app-icon.md)
+- [发布前脱敏检查](docs/publication.md)
 
 重新导出原生截图与 GIF：
 
